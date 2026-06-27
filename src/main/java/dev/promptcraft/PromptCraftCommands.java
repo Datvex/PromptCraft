@@ -120,9 +120,6 @@ public final class PromptCraftCommands {
 
             dev.promptcraft.item.SelectionBrushItem.setFirstPosition(serverPlayer, pos);
 
-            /*
-             * Return SUCCESS to prevent normal block breaking with the brush.
-             */
             return ActionResult.SUCCESS;
         });
     }
@@ -211,9 +208,6 @@ public final class PromptCraftCommands {
             return 0;
         }
 
-        /*
-         * AI generation, validation, clearing and building will be implemented in the next part.
-         */
         player.sendMessage(Text.translatable("promptcraft.message.prompt.confirmed_placeholder").formatted(Formatting.GREEN), false);
         PromptSessionManager.clearPending(player);
 

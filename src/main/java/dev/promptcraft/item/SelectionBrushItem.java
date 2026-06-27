@@ -13,7 +13,6 @@ import net.minecraft.util.ActionResult;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.Hand;
 import net.minecraft.util.TypedActionResult;
-import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
@@ -44,9 +43,6 @@ public class SelectionBrushItem extends Item {
         BlockPos pos = context.getBlockPos();
         PlayerSelection selection = SelectionManager.get(serverPlayer);
 
-        /*
-         * Right click selects the second position.
-         */
         if (!selection.hasFirst()) {
             serverPlayer.sendMessage(Text.literal("Select the first position with left click first.").formatted(Formatting.YELLOW), false);
             return ActionResult.SUCCESS;
@@ -91,24 +87,14 @@ public class SelectionBrushItem extends Item {
         return ActionResult.SUCCESS;
     }
 
-    /*
-     * This method handles right click in air, but block selection is handled by useOnBlock.
-     */
     @Override
     public TypedActionResult<ItemStack> use(World world, PlayerEntity user, Hand hand) {
         return TypedActionResult.pass(user.getStackInHand(hand));
     }
 
-    /*
-     * Fabric/Minecraft does not directly call item methods for left-click block selection.
-     * Left-click handling is registered in PromptCraftCommands / event setup in the next file.
-     */
     public static void setFirstPosition(ServerPlayerEntity player, BlockPos pos) {
         PlayerSelection selection = SelectionManager.get(player);
 
-        /*
-         * If selection is already complete, starting a new left-click selection resets it.
-         */
         if (selection.isComplete()) {
             selection.clear();
         }
