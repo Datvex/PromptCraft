@@ -1,0 +1,6 @@
+{
+  "parent": "item/generated",
+  "textures": {
+    "layer0": "promptcraft:item/brush2_texture_32x32"
+  }
+}

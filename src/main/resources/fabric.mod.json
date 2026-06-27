@@ -3,20 +3,26 @@
   "id": "promptcraft",
   "version": "${version}",
   "name": "PromptCraft",
-  "description": "AI-powered building mod for Minecraft. Select an area with the Prompt Brush, describe what you want, and let AI build it.",
-  "authors": ["PromptCraft"],
+  "description": "AI-powered building assistant for Minecraft.",
+  "authors": [
+    "PromptCraft Team"
+  ],
   "contact": {},
-  "license": "MIT",
+  "license": "All Rights Reserved",
+  "icon": "assets/promptcraft/textures/item/brush2_texture_32x32.png",
   "environment": "*",
   "entrypoints": {
-    "main": ["com.promptcraft.PromptCraftMod"],
-    "client": ["com.promptcraft.client.PromptCraftClient"]
+    "main": [
+      "dev.promptcraft.PromptCraftMod"
+    ],
+    "client": [
+      "dev.promptcraft.client.PromptCraftClient"
+    ]
   },
-  "mixins": [],
   "depends": {
-    "fabricloader": ">=0.15.7",
+    "fabricloader": ">=0.15.0",
     "fabric-api": "*",
-    "minecraft": "~1.20.1",
+    "minecraft": "1.20.1",
     "java": ">=17"
   }
 }
