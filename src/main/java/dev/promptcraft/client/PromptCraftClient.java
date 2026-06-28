@@ -10,7 +10,6 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.*;
-import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -42,30 +41,31 @@ public class PromptCraftClient implements ClientModInitializer {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null) return;
             
-            // Reload config silently if needed to check preview status
             boolean showPreview = PromptCraftConfigManager.get().showSelectionPreview;
-
             BlockPos pos1 = firstPos;
             BlockPos pos2 = secondPos;
 
-            // Dynamic preview logic
             if (showPreview && pos1 != null && pos2 == null) {
-                HitResult hit = client.crosshairTarget;
-                if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
-                    pos2 = ((BlockHitResult) hit).getBlockPos();
-                } else {
-                    pos2 = pos1;
-                }
+                // Stable 64-block raycast fallback
+                HitResult hit = client.player.raycast(64.0D, context.tickDelta(), false);
+                pos2 = BlockPos.ofFloored(hit.getPos());
             }
 
             if (pos1 == null || pos2 == null) return;
+
+            // Parse hex color
+            String hex = PromptCraftConfigManager.get().themeColor.replace("#", "");
+            int color = 0x17b95f;
+            try { color = Integer.parseInt(hex, 16); } catch (Exception ignored) {}
+            float r = ((color >> 16) & 0xFF) / 255f;
+            float g = ((color >> 8) & 0xFF) / 255f;
+            float b = (color & 0xFF) / 255f;
 
             Vec3d cameraPos = context.camera().getPos();
             Matrix4f matrix = context.matrixStack().peek().getPositionMatrix();
             Tessellator tessellator = Tessellator.getInstance();
             BufferBuilder buffer = tessellator.getBuffer();
 
-            // Inclusive bounds: +1 to Max coordinates to fully enclose the blocks
             int minX = Math.min(pos1.getX(), pos2.getX());
             int minY = Math.min(pos1.getY(), pos2.getY());
             int minZ = Math.min(pos1.getZ(), pos2.getZ());
@@ -73,7 +73,7 @@ public class PromptCraftClient implements ClientModInitializer {
             int maxY = Math.max(pos1.getY(), pos2.getY()) + 1;
             int maxZ = Math.max(pos1.getZ(), pos2.getZ()) + 1;
 
-            Box box = new Box(minX, minY, minZ, maxX, maxY, maxZ).expand(0.005).offset(-cameraPos.x, -cameraPos.y, -cameraPos.z);
+            Box box = new Box(minX, minY, minZ, maxX, maxY, maxZ).offset(-cameraPos.x, -cameraPos.y, -cameraPos.z);
 
             RenderSystem.enableBlend();
             RenderSystem.defaultBlendFunc();
@@ -81,18 +81,16 @@ public class PromptCraftClient implements ClientModInitializer {
             RenderSystem.depthMask(false);
             RenderSystem.setShader(GameRenderer::getPositionColorProgram);
 
-            // Draw filled inner box
+            // Draw inner transparent box
             buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
-            drawFilledBox(matrix, buffer, box, 22/255f, 91/255f, 212/255f, 0.4f);
+            drawFilledBox(matrix, buffer, box, r, g, b, 0.2f);
             tessellator.draw();
 
-            // Thicker outline
-            RenderSystem.lineWidth(5.0f);
-            buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
-            WorldRenderer.drawBox(context.matrixStack(), buffer, box, 1.0f, 1.0f, 1.0f, 1.0f);
+            // Draw THICK outline using 12 quads to bypass OpenGL line width limits
+            buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+            drawThickOutline(matrix, buffer, box, 0.05f, r, g, b, 1.0f);
             tessellator.draw();
 
-            RenderSystem.lineWidth(1.0f); // Reset
             RenderSystem.depthMask(true);
             RenderSystem.enableCull();
             RenderSystem.disableBlend();
@@ -114,5 +112,25 @@ public class PromptCraftClient implements ClientModInitializer {
         buffer.vertex(matrix, minX, maxY, minZ).color(r, g, b, a).next(); buffer.vertex(matrix, minX, minY, minZ).color(r, g, b, a).next();
         buffer.vertex(matrix, maxX, minY, minZ).color(r, g, b, a).next(); buffer.vertex(matrix, maxX, maxY, minZ).color(r, g, b, a).next();
         buffer.vertex(matrix, maxX, maxY, maxZ).color(r, g, b, a).next(); buffer.vertex(matrix, maxX, minY, maxZ).color(r, g, b, a).next();
+    }
+
+    private void drawThickOutline(Matrix4f matrix, BufferBuilder buffer, Box box, float t, float r, float g, float b, float a) {
+        float x1 = (float)box.minX, y1 = (float)box.minY, z1 = (float)box.minZ;
+        float x2 = (float)box.maxX, y2 = (float)box.maxY, z2 = (float)box.maxZ;
+        // Bottom edges
+        drawFilledBox(matrix, buffer, new Box(x1-t, y1-t, z1-t, x2+t, y1+t, z1+t), r, g, b, a);
+        drawFilledBox(matrix, buffer, new Box(x1-t, y1-t, z2-t, x2+t, y1+t, z2+t), r, g, b, a);
+        drawFilledBox(matrix, buffer, new Box(x1-t, y1-t, z1-t, x1+t, y1+t, z2+t), r, g, b, a);
+        drawFilledBox(matrix, buffer, new Box(x2-t, y1-t, z1-t, x2+t, y1+t, z2+t), r, g, b, a);
+        // Top edges
+        drawFilledBox(matrix, buffer, new Box(x1-t, y2-t, z1-t, x2+t, y2+t, z1+t), r, g, b, a);
+        drawFilledBox(matrix, buffer, new Box(x1-t, y2-t, z2-t, x2+t, y2+t, z2+t), r, g, b, a);
+        drawFilledBox(matrix, buffer, new Box(x1-t, y2-t, z1-t, x1+t, y2+t, z2+t), r, g, b, a);
+        drawFilledBox(matrix, buffer, new Box(x2-t, y2-t, z1-t, x2+t, y2+t, z2+t), r, g, b, a);
+        // Vertical edges
+        drawFilledBox(matrix, buffer, new Box(x1-t, y1-t, z1-t, x1+t, y2+t, z1+t), r, g, b, a);
+        drawFilledBox(matrix, buffer, new Box(x2-t, y1-t, z1-t, x2+t, y2+t, z1+t), r, g, b, a);
+        drawFilledBox(matrix, buffer, new Box(x1-t, y1-t, z2-t, x1+t, y2+t, z2+t), r, g, b, a);
+        drawFilledBox(matrix, buffer, new Box(x2-t, y1-t, z2-t, x2+t, y2+t, z2+t), r, g, b, a);
     }
 }

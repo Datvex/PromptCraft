@@ -5,6 +5,7 @@ public class PromptCraftConfig {
     public String baseUrl = "https://integrate.api.nvidia.com/v1";
     public String model = "meta/llama-3.1-70b-instruct";
     public String accessMode = "admins_only";
+    public String themeColor = "#17b95f"; // Default neon green
 
     public boolean showProcessMessages = true;
     public boolean enableDestructionAnimation = true;
