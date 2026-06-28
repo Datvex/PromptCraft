@@ -38,21 +38,7 @@ public final class PromptCraftCommands {
                                     StringArgumentType.getString(context, "prompt")
                             ))));
 
-            dispatcher.register(CommandManager.literal("PromptCraft")
-                    .then(CommandManager.argument("prompt", StringArgumentType.greedyString())
-                            .executes(context -> handlePromptCraft(
-                                    context.getSource(),
-                                    StringArgumentType.getString(context, "prompt")
-                            ))));
-
             dispatcher.register(CommandManager.literal("promptedit")
-                    .then(CommandManager.argument("prompt", StringArgumentType.greedyString())
-                            .executes(context -> handlePromptEdit(
-                                    context.getSource(),
-                                    StringArgumentType.getString(context, "prompt")
-                            ))));
-
-            dispatcher.register(CommandManager.literal("PromptEdit")
                     .then(CommandManager.argument("prompt", StringArgumentType.greedyString())
                             .executes(context -> handlePromptEdit(
                                     context.getSource(),
@@ -62,37 +48,19 @@ public final class PromptCraftCommands {
             dispatcher.register(CommandManager.literal("promptconfirm")
                     .executes(context -> handlePromptConfirm(context.getSource())));
 
-            dispatcher.register(CommandManager.literal("PromptConfirm")
-                    .executes(context -> handlePromptConfirm(context.getSource())));
-
             dispatcher.register(CommandManager.literal("promptcancel")
-                    .executes(context -> handlePromptCancel(context.getSource())));
-
-            dispatcher.register(CommandManager.literal("PromptCancel")
                     .executes(context -> handlePromptCancel(context.getSource())));
 
             dispatcher.register(CommandManager.literal("promptundo")
                     .executes(context -> handlePromptUndo(context.getSource())));
 
-            dispatcher.register(CommandManager.literal("PromptUndo")
-                    .executes(context -> handlePromptUndo(context.getSource())));
-
             dispatcher.register(CommandManager.literal("promptback")
-                    .executes(context -> handlePromptBack(context.getSource())));
-
-            dispatcher.register(CommandManager.literal("PromptBack")
                     .executes(context -> handlePromptBack(context.getSource())));
 
             dispatcher.register(CommandManager.literal("promptnext")
                     .executes(context -> handlePromptNext(context.getSource())));
 
-            dispatcher.register(CommandManager.literal("PromptNext")
-                    .executes(context -> handlePromptNext(context.getSource())));
-
             dispatcher.register(CommandManager.literal("promptsettings")
-                    .executes(context -> handlePromptSettings(context.getSource())));
-
-            dispatcher.register(CommandManager.literal("PromptSettings")
                     .executes(context -> handlePromptSettings(context.getSource())));
         });
     }
