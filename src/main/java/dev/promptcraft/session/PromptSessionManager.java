@@ -9,9 +9,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class PromptSessionManager {
     private static final Map<UUID, PendingPrompt> PENDING_PROMPTS = new ConcurrentHashMap<>();
+    private static final Map<UUID, PendingPrompt> LAST_PROMPTS = new ConcurrentHashMap<>();
 
-    private PromptSessionManager() {
-    }
+    private PromptSessionManager() {}
 
     public static void setPending(ServerPlayerEntity player, PendingPrompt prompt) {
         PENDING_PROMPTS.put(player.getUuid(), prompt);
@@ -23,5 +23,13 @@ public final class PromptSessionManager {
 
     public static void clearPending(ServerPlayerEntity player) {
         PENDING_PROMPTS.remove(player.getUuid());
+    }
+
+    public static void setLast(ServerPlayerEntity player, PendingPrompt prompt) {
+        LAST_PROMPTS.put(player.getUuid(), prompt);
+    }
+
+    public static Optional<PendingPrompt> getLast(ServerPlayerEntity player) {
+        return Optional.ofNullable(LAST_PROMPTS.get(player.getUuid()));
     }
 }

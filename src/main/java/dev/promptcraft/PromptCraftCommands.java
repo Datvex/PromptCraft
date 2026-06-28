@@ -2,9 +2,8 @@ package dev.promptcraft;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
 import dev.promptcraft.ai.AiClient;
-import dev.promptcraft.config.PromptCraftConfig;
+import dev.promptcraft.network.PromptCraftNetworking;
 import dev.promptcraft.config.PromptCraftConfigManager;
-import dev.promptcraft.config.PromptCraftEnv;
 import dev.promptcraft.selection.PlayerSelection;
 import dev.promptcraft.selection.SelectionManager;
 import dev.promptcraft.session.PendingPrompt;
@@ -20,7 +19,6 @@ import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.ClickEvent;
-import net.minecraft.text.HoverEvent;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
@@ -45,7 +43,7 @@ public final class PromptCraftCommands {
             dispatcher.register(CommandManager.literal("promptconfirm").executes(context -> handlePromptConfirm(context.getSource())));
             dispatcher.register(CommandManager.literal("promptcancel").executes(context -> handlePromptCancel(context.getSource())));
             dispatcher.register(CommandManager.literal("promptundo").executes(context -> handlePromptUndo(context.getSource())));
-            dispatcher.register(CommandManager.literal("promptback").executes(context -> handlePromptBack(context.getSource())));
+            dispatcher.register(CommandManager.literal("promptback").executes(context -> handlePromptUndo(context.getSource())));
             dispatcher.register(CommandManager.literal("promptnext").executes(context -> handlePromptNext(context.getSource())));
             dispatcher.register(CommandManager.literal("promptsettings").executes(context -> handlePromptSettings(context.getSource())));
         });
@@ -81,9 +79,24 @@ public final class PromptCraftCommands {
         return 1;
     }
 
-    private static int handlePromptEdit(ServerCommandSource source, String prompt) {
+    private static int handlePromptEdit(ServerCommandSource source, String editRequest) {
         ServerPlayerEntity player = getPlayerOrFail(source);
-        if (player != null && validatePlayerCanUsePromptCraft(player)) player.sendMessage(Text.literal("Edit registered: " + prompt).formatted(Formatting.YELLOW), false);
+        if (player == null || !validatePlayerCanUsePromptCraft(player)) return 0;
+
+        var lastOptional = PromptSessionManager.getLast(player);
+        if (lastOptional.isEmpty()) {
+            player.sendMessage(Text.literal("No previous prompt to edit! Use /promptcraft first.").formatted(Formatting.RED), false);
+            return 0;
+        }
+
+        PendingPrompt last = lastOptional.get();
+        String combinedPrompt = "Original request: " + last.getPrompt() + ". User edit request: " + editRequest + ". Please modify the design accordingly.";
+        
+        PendingPrompt pendingPrompt = new PendingPrompt(combinedPrompt, last.getSelectionMin(), last.getSelectionMax(), last.getWidth(), last.getHeight(), last.getDepth());
+        PromptSessionManager.setPending(player, pendingPrompt);
+        
+        player.sendMessage(Text.literal("Edit requested!").formatted(Formatting.GOLD), false);
+        sendConfirmationMessage(player, editRequest);
         return 1;
     }
 
@@ -99,6 +112,7 @@ public final class PromptCraftCommands {
 
         PendingPrompt prompt = optionalPrompt.get();
         PromptSessionManager.clearPending(player);
+        PromptSessionManager.setLast(player, prompt);
         player.sendMessage(Text.literal("Preparing area...").formatted(Formatting.YELLOW), false);
 
         TaskManager.addTask(new DestructionTask(player, prompt.getSelectionMin(), prompt.getSelectionMax(), () -> {
@@ -131,7 +145,7 @@ public final class PromptCraftCommands {
         ServerPlayerEntity player = getPlayerOrFail(source);
         if (player != null && validatePlayerCanUsePromptCraft(player)) {
             if (HistoryManager.undo(player)) {
-                player.sendMessage(Text.literal("Undo successful! Area restored.").formatted(Formatting.GREEN), false);
+                player.sendMessage(Text.literal("Undo successful! Step back.").formatted(Formatting.GREEN), false);
             } else {
                 player.sendMessage(Text.literal("Nothing to undo.").formatted(Formatting.RED), false);
             }
@@ -139,23 +153,21 @@ public final class PromptCraftCommands {
         return 1;
     }
 
-    private static int handlePromptBack(ServerCommandSource source) {
-        ServerPlayerEntity player = getPlayerOrFail(source);
-        if (player != null && validatePlayerCanUsePromptCraft(player)) player.sendMessage(Text.literal("Step back.").formatted(Formatting.YELLOW), false);
-        return 1;
-    }
-
     private static int handlePromptNext(ServerCommandSource source) {
         ServerPlayerEntity player = getPlayerOrFail(source);
-        if (player != null && validatePlayerCanUsePromptCraft(player)) player.sendMessage(Text.literal("Step forward.").formatted(Formatting.YELLOW), false);
+        if (player != null && validatePlayerCanUsePromptCraft(player)) {
+            if (HistoryManager.redo(player)) {
+                player.sendMessage(Text.literal("Redo successful! Step forward.").formatted(Formatting.GREEN), false);
+            } else {
+                player.sendMessage(Text.literal("Nothing to redo.").formatted(Formatting.RED), false);
+            }
+        }
         return 1;
     }
 
     private static int handlePromptSettings(ServerCommandSource source) {
         ServerPlayerEntity player = getPlayerOrFail(source);
-        if (player == null || !hasAccess(player)) return 0;
-        
-        dev.promptcraft.network.PromptCraftNetworking.openSettingsGui(player);
+        if (player != null && hasAccess(player)) PromptCraftNetworking.openSettingsGui(player);
         return 1;
     }
 
@@ -165,8 +177,8 @@ public final class PromptCraftCommands {
 
         MutableText yes = Text.literal("[YES, START]").formatted(Formatting.GREEN, Formatting.BOLD)
                 .styled(style -> style.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/promptconfirm")));
-        MutableText no = Text.literal("[NO, EDIT]").formatted(Formatting.RED, Formatting.BOLD)
-                .styled(style -> style.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/promptcraft " + prompt)));
+        MutableText no = Text.literal("[NO, CANCEL]").formatted(Formatting.RED, Formatting.BOLD)
+                .styled(style -> style.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/promptcancel")));
 
         player.sendMessage(Text.empty().append(yes).append(Text.literal("  ")).append(no), false);
     }
@@ -188,10 +200,6 @@ public final class PromptCraftCommands {
     }
 
     private static ServerPlayerEntity getPlayerOrFail(ServerCommandSource source) {
-        try {
-            return source.getPlayerOrThrow();
-        } catch (Exception e) {
-            return null;
-        }
+        try { return source.getPlayerOrThrow(); } catch (Exception e) { return null; }
     }
 }
