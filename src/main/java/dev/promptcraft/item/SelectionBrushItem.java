@@ -2,6 +2,7 @@ package dev.promptcraft.item;
 
 import dev.promptcraft.config.PromptCraftConfig;
 import dev.promptcraft.config.PromptCraftConfigManager;
+import dev.promptcraft.network.PromptCraftNetworking;
 import dev.promptcraft.selection.PlayerSelection;
 import dev.promptcraft.selection.SelectionManager;
 import net.minecraft.entity.player.PlayerEntity;
@@ -24,19 +25,13 @@ public class SelectionBrushItem extends Item {
     @Override
     public ActionResult useOnBlock(net.minecraft.item.ItemUsageContext context) {
         World world = context.getWorld();
-
-        if (world.isClient()) {
-            return ActionResult.SUCCESS;
-        }
+        if (world.isClient()) return ActionResult.SUCCESS;
 
         PlayerEntity player = context.getPlayer();
-
-        if (!(player instanceof ServerPlayerEntity serverPlayer)) {
-            return ActionResult.PASS;
-        }
+        if (!(player instanceof ServerPlayerEntity serverPlayer)) return ActionResult.PASS;
 
         if (!hasAccess(serverPlayer)) {
-            serverPlayer.sendMessage(Text.translatable("promptcraft.message.access_denied").formatted(Formatting.RED), false);
+            serverPlayer.sendMessage(Text.literal("Access Denied.").formatted(Formatting.RED), false);
             return ActionResult.FAIL;
         }
 
@@ -49,41 +44,17 @@ public class SelectionBrushItem extends Item {
         }
 
         selection.setSecond(pos.toImmutable());
+        PromptCraftNetworking.syncSelection(serverPlayer, selection);
 
-        serverPlayer.sendMessage(
-                Text.translatable("promptcraft.message.selection.second", formatPos(pos)).formatted(Formatting.AQUA),
-                false
-        );
+        serverPlayer.sendMessage(Text.literal("Second position set at " + formatPos(pos)).formatted(Formatting.AQUA), false);
 
         if (!SelectionManager.isWithinLimit(selection)) {
             PromptCraftConfig config = PromptCraftConfigManager.get();
-
-            serverPlayer.sendMessage(
-                    Text.translatable(
-                            "promptcraft.message.selection.too_large",
-                            selection.getWidth(),
-                            selection.getHeight(),
-                            selection.getDepth(),
-                            config.maxSelectionWidth,
-                            config.maxSelectionHeight,
-                            config.maxSelectionDepth
-                    ).formatted(Formatting.RED),
-                    false
-            );
-
+            serverPlayer.sendMessage(Text.literal("Selection too large!").formatted(Formatting.RED), false);
             return ActionResult.SUCCESS;
         }
 
-        serverPlayer.sendMessage(
-                Text.translatable(
-                        "promptcraft.message.selection.ready",
-                        selection.getWidth(),
-                        selection.getHeight(),
-                        selection.getDepth()
-                ).formatted(Formatting.GREEN),
-                false
-        );
-
+        serverPlayer.sendMessage(Text.literal("Selection ready! Area: " + selection.getWidth() + "x" + selection.getHeight() + "x" + selection.getDepth()).formatted(Formatting.GREEN), false);
         return ActionResult.SUCCESS;
     }
 
@@ -94,30 +65,21 @@ public class SelectionBrushItem extends Item {
 
     public static void setFirstPosition(ServerPlayerEntity player, BlockPos pos) {
         PlayerSelection selection = SelectionManager.get(player);
-
         if (selection.isComplete()) {
             selection.clear();
         }
-
         selection.setFirst(pos.toImmutable());
-
-        player.sendMessage(
-                Text.translatable("promptcraft.message.selection.first", formatPos(pos)).formatted(Formatting.AQUA),
-                false
-        );
+        PromptCraftNetworking.syncSelection(player, selection);
+        player.sendMessage(Text.literal("First position set at " + formatPos(pos)).formatted(Formatting.AQUA), false);
     }
 
     private static String formatPos(BlockPos pos) {
-        return "%d %d %d".formatted(pos.getX(), pos.getY(), pos.getZ());
+        return pos.getX() + " " + pos.getY() + " " + pos.getZ();
     }
 
     private static boolean hasAccess(ServerPlayerEntity player) {
         PromptCraftConfig config = PromptCraftConfigManager.get();
-
-        if (config.isAccessEveryone()) {
-            return true;
-        }
-
+        if (config.isAccessEveryone()) return true;
         return player.hasPermissionLevel(2);
     }
 }

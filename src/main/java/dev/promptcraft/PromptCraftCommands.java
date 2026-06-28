@@ -8,6 +8,9 @@ import dev.promptcraft.selection.PlayerSelection;
 import dev.promptcraft.selection.SelectionManager;
 import dev.promptcraft.session.PendingPrompt;
 import dev.promptcraft.session.PromptSessionManager;
+import dev.promptcraft.structure.HistoryManager;
+import dev.promptcraft.task.DestructionTask;
+import dev.promptcraft.task.TaskManager;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import net.minecraft.item.ItemStack;
@@ -15,14 +18,14 @@ import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.ClickEvent;
+import net.minecraft.text.HoverEvent;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Formatting;
 
 public final class PromptCraftCommands {
-    private PromptCraftCommands() {
-    }
+    private PromptCraftCommands() {}
 
     public static void register() {
         registerCommands();
@@ -33,300 +36,162 @@ public final class PromptCraftCommands {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(CommandManager.literal("promptcraft")
                     .then(CommandManager.argument("prompt", StringArgumentType.greedyString())
-                            .executes(context -> handlePromptCraft(
-                                    context.getSource(),
-                                    StringArgumentType.getString(context, "prompt")
-                            ))));
-
+                            .executes(context -> handlePromptCraft(context.getSource(), StringArgumentType.getString(context, "prompt")))));
             dispatcher.register(CommandManager.literal("promptedit")
                     .then(CommandManager.argument("prompt", StringArgumentType.greedyString())
-                            .executes(context -> handlePromptEdit(
-                                    context.getSource(),
-                                    StringArgumentType.getString(context, "prompt")
-                            ))));
-
-            dispatcher.register(CommandManager.literal("promptconfirm")
-                    .executes(context -> handlePromptConfirm(context.getSource())));
-
-            dispatcher.register(CommandManager.literal("promptcancel")
-                    .executes(context -> handlePromptCancel(context.getSource())));
-
-            dispatcher.register(CommandManager.literal("promptundo")
-                    .executes(context -> handlePromptUndo(context.getSource())));
-
-            dispatcher.register(CommandManager.literal("promptback")
-                    .executes(context -> handlePromptBack(context.getSource())));
-
-            dispatcher.register(CommandManager.literal("promptnext")
-                    .executes(context -> handlePromptNext(context.getSource())));
-
-            dispatcher.register(CommandManager.literal("promptsettings")
-                    .executes(context -> handlePromptSettings(context.getSource())));
+                            .executes(context -> handlePromptEdit(context.getSource(), StringArgumentType.getString(context, "prompt")))));
+            dispatcher.register(CommandManager.literal("promptconfirm").executes(context -> handlePromptConfirm(context.getSource())));
+            dispatcher.register(CommandManager.literal("promptcancel").executes(context -> handlePromptCancel(context.getSource())));
+            dispatcher.register(CommandManager.literal("promptundo").executes(context -> handlePromptUndo(context.getSource())));
+            dispatcher.register(CommandManager.literal("promptback").executes(context -> handlePromptBack(context.getSource())));
+            dispatcher.register(CommandManager.literal("promptnext").executes(context -> handlePromptNext(context.getSource())));
+            dispatcher.register(CommandManager.literal("promptsettings").executes(context -> handlePromptSettings(context.getSource())));
         });
     }
 
     private static void registerLeftClickSelectionEvent() {
         AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
-            if (world.isClient()) {
-                return ActionResult.PASS;
-            }
-
-            if (!(player instanceof ServerPlayerEntity serverPlayer)) {
-                return ActionResult.PASS;
-            }
-
+            if (world.isClient() || !(player instanceof ServerPlayerEntity serverPlayer)) return ActionResult.PASS;
             ItemStack stack = serverPlayer.getStackInHand(hand);
-
-            if (!stack.isOf(PromptCraftItems.SELECTION_BRUSH)) {
-                return ActionResult.PASS;
-            }
-
+            if (!stack.isOf(PromptCraftItems.SELECTION_BRUSH)) return ActionResult.PASS;
             if (!hasAccess(serverPlayer)) {
-                serverPlayer.sendMessage(Text.translatable("promptcraft.message.access_denied").formatted(Formatting.RED), false);
+                serverPlayer.sendMessage(Text.literal("Access Denied.").formatted(Formatting.RED), false);
                 return ActionResult.FAIL;
             }
-
             dev.promptcraft.item.SelectionBrushItem.setFirstPosition(serverPlayer, pos);
-
             return ActionResult.SUCCESS;
         });
     }
 
     private static int handlePromptCraft(ServerCommandSource source, String prompt) {
         ServerPlayerEntity player = getPlayerOrFail(source);
-
-        if (player == null) {
-            return 0;
-        }
-
-        if (!validatePlayerCanUsePromptCraft(player)) {
-            return 0;
-        }
+        if (player == null || !validatePlayerCanUsePromptCraft(player)) return 0;
 
         PlayerSelection selection = SelectionManager.get(player);
-
         if (!selection.isComplete()) {
-            player.sendMessage(Text.translatable("promptcraft.message.selection.required").formatted(Formatting.RED), false);
+            player.sendMessage(Text.literal("You must select an area first!").formatted(Formatting.RED), false);
             return 0;
         }
 
-        if (!SelectionManager.isWithinLimit(selection)) {
-            PromptCraftConfig config = PromptCraftConfigManager.get();
-
-            player.sendMessage(
-                    Text.translatable(
-                            "promptcraft.message.selection.too_large",
-                            selection.getWidth(),
-                            selection.getHeight(),
-                            selection.getDepth(),
-                            config.maxSelectionWidth,
-                            config.maxSelectionHeight,
-                            config.maxSelectionDepth
-                    ).formatted(Formatting.RED),
-                    false
-            );
-
-            return 0;
-        }
-
-        PendingPrompt pendingPrompt = new PendingPrompt(
-                prompt,
-                selection.getMin(),
-                selection.getMax(),
-                selection.getWidth(),
-                selection.getHeight(),
-                selection.getDepth()
-        );
-
+        PendingPrompt pendingPrompt = new PendingPrompt(prompt, selection.getMin(), selection.getMax(), selection.getWidth(), selection.getHeight(), selection.getDepth());
         PromptSessionManager.setPending(player, pendingPrompt);
-
         sendConfirmationMessage(player, prompt);
-
         return 1;
     }
 
     private static int handlePromptEdit(ServerCommandSource source, String prompt) {
         ServerPlayerEntity player = getPlayerOrFail(source);
-
-        if (player == null) {
-            return 0;
-        }
-
-        if (!validatePlayerCanUsePromptCraft(player)) {
-            return 0;
-        }
-
-        player.sendMessage(Text.translatable("promptcraft.message.edit.placeholder").formatted(Formatting.YELLOW), false);
+        if (player != null && validatePlayerCanUsePromptCraft(player)) player.sendMessage(Text.literal("Edit registered: " + prompt).formatted(Formatting.YELLOW), false);
         return 1;
     }
 
     private static int handlePromptConfirm(ServerCommandSource source) {
         ServerPlayerEntity player = getPlayerOrFail(source);
+        if (player == null || !validatePlayerCanUsePromptCraft(player)) return 0;
 
-        if (player == null) {
+        var optionalPrompt = PromptSessionManager.getPending(player);
+        if (optionalPrompt.isEmpty()) {
+            player.sendMessage(Text.literal("No pending prompt found.").formatted(Formatting.RED), false);
             return 0;
         }
 
-        if (!validatePlayerCanUsePromptCraft(player)) {
-            return 0;
-        }
-
-        if (PromptSessionManager.getPending(player).isEmpty()) {
-            player.sendMessage(Text.translatable("promptcraft.message.prompt.pending_missing").formatted(Formatting.RED), false);
-            return 0;
-        }
-
-        player.sendMessage(Text.translatable("promptcraft.message.prompt.confirmed_placeholder").formatted(Formatting.GREEN), false);
+        PendingPrompt prompt = optionalPrompt.get();
         PromptSessionManager.clearPending(player);
+        player.sendMessage(Text.literal("Preparing area...").formatted(Formatting.YELLOW), false);
+
+        TaskManager.addTask(new DestructionTask(player, prompt.getSelectionMin(), prompt.getSelectionMax(), () -> {
+            player.sendMessage(Text.literal("[AI Placeholder] Sent to NVIDIA API...").formatted(Formatting.AQUA), false);
+        }));
 
         return 1;
     }
 
     private static int handlePromptCancel(ServerCommandSource source) {
         ServerPlayerEntity player = getPlayerOrFail(source);
-
-        if (player == null) {
-            return 0;
+        if (player != null) {
+            PromptSessionManager.clearPending(player);
+            player.sendMessage(Text.literal("Prompt cancelled.").formatted(Formatting.YELLOW), false);
         }
-
-        PromptSessionManager.clearPending(player);
-        player.sendMessage(Text.translatable("promptcraft.message.prompt.cancelled").formatted(Formatting.YELLOW), false);
-
         return 1;
     }
 
     private static int handlePromptUndo(ServerCommandSource source) {
         ServerPlayerEntity player = getPlayerOrFail(source);
-
-        if (player == null) {
-            return 0;
+        if (player != null && validatePlayerCanUsePromptCraft(player)) {
+            if (HistoryManager.undo(player)) {
+                player.sendMessage(Text.literal("Undo successful! Area restored.").formatted(Formatting.GREEN), false);
+            } else {
+                player.sendMessage(Text.literal("Nothing to undo.").formatted(Formatting.RED), false);
+            }
         }
-
-        if (!validatePlayerCanUsePromptCraft(player)) {
-            return 0;
-        }
-
-        player.sendMessage(Text.translatable("promptcraft.message.undo.placeholder").formatted(Formatting.YELLOW), false);
         return 1;
     }
 
     private static int handlePromptBack(ServerCommandSource source) {
         ServerPlayerEntity player = getPlayerOrFail(source);
-
-        if (player == null) {
-            return 0;
-        }
-
-        if (!validatePlayerCanUsePromptCraft(player)) {
-            return 0;
-        }
-
-        player.sendMessage(Text.translatable("promptcraft.message.back.placeholder").formatted(Formatting.YELLOW), false);
+        if (player != null && validatePlayerCanUsePromptCraft(player)) player.sendMessage(Text.literal("Step back.").formatted(Formatting.YELLOW), false);
         return 1;
     }
 
     private static int handlePromptNext(ServerCommandSource source) {
         ServerPlayerEntity player = getPlayerOrFail(source);
-
-        if (player == null) {
-            return 0;
-        }
-
-        if (!validatePlayerCanUsePromptCraft(player)) {
-            return 0;
-        }
-
-        player.sendMessage(Text.translatable("promptcraft.message.next.placeholder").formatted(Formatting.YELLOW), false);
+        if (player != null && validatePlayerCanUsePromptCraft(player)) player.sendMessage(Text.literal("Step forward.").formatted(Formatting.YELLOW), false);
         return 1;
     }
 
     private static int handlePromptSettings(ServerCommandSource source) {
         ServerPlayerEntity player = getPlayerOrFail(source);
-
-        if (player == null) {
-            return 0;
-        }
-
-        if (!hasAccess(player)) {
-            player.sendMessage(Text.translatable("promptcraft.message.access_denied").formatted(Formatting.RED), false);
-            return 0;
-        }
+        if (player == null || !hasAccess(player)) return 0;
 
         PromptCraftConfig config = PromptCraftConfigManager.get();
+        String configDir = PromptCraftConfigManager.getConfigPath().getParent().toString();
 
-        player.sendMessage(Text.translatable("promptcraft.message.settings.header").formatted(Formatting.GOLD), false);
-        player.sendMessage(Text.translatable("promptcraft.message.settings.config_path", PromptCraftConfigManager.getConfigPath().toString()).formatted(Formatting.GRAY), false);
-        player.sendMessage(Text.translatable("promptcraft.message.settings.env_path", PromptCraftConfigManager.getEnvPath().toString()).formatted(Formatting.GRAY), false);
-        player.sendMessage(Text.translatable("promptcraft.message.settings.provider", config.provider).formatted(Formatting.GRAY), false);
-        player.sendMessage(Text.translatable("promptcraft.message.settings.model", config.model).formatted(Formatting.GRAY), false);
-        player.sendMessage(Text.translatable("promptcraft.message.settings.access", config.accessMode).formatted(Formatting.GRAY), false);
-        player.sendMessage(Text.translatable("promptcraft.message.settings.api_key", PromptCraftEnv.getMaskedNvidiaApiKeyStatus()).formatted(Formatting.GRAY), false);
-        player.sendMessage(
-                Text.translatable(
-                        "promptcraft.message.settings.limit",
-                        config.selectionLimitEnabled ? "enabled" : "disabled",
-                        config.maxSelectionWidth,
-                        config.maxSelectionHeight,
-                        config.maxSelectionDepth
-                ).formatted(Formatting.GRAY),
-                false
-        );
+        MutableText folderLink = Text.literal("[Click here to open folder]")
+                .formatted(Formatting.AQUA, Formatting.UNDERLINE)
+                .styled(style -> style
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_FILE, configDir))
+                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Text.literal("Opens the folder to edit .env and config.json"))));
 
+        player.sendMessage(Text.literal("=== PromptCraft Settings ===").formatted(Formatting.GOLD), false);
+        player.sendMessage(Text.literal("Setup API Key: ").append(folderLink), false);
+        player.sendMessage(Text.literal("Provider: " + config.provider).formatted(Formatting.GRAY), false);
+        player.sendMessage(Text.literal("Model: " + config.model).formatted(Formatting.GRAY), false);
+        player.sendMessage(Text.literal("API Key: " + PromptCraftEnv.getMaskedNvidiaApiKeyStatus()).formatted(Formatting.GRAY), false);
         return 1;
     }
 
     private static void sendConfirmationMessage(ServerPlayerEntity player, String prompt) {
-        player.sendMessage(Text.translatable("promptcraft.message.prompt.confirm").formatted(Formatting.GOLD), false);
+        player.sendMessage(Text.literal("Confirm building?").formatted(Formatting.GOLD), false);
         player.sendMessage(Text.literal("\"" + prompt + "\"").formatted(Formatting.WHITE), false);
 
-        MutableText yes = Text.translatable("promptcraft.message.prompt.yes")
-                .formatted(Formatting.GREEN, Formatting.BOLD)
-                .styled(style -> style.withClickEvent(new ClickEvent(
-                        ClickEvent.Action.RUN_COMMAND,
-                        "/promptconfirm"
-                )));
+        MutableText yes = Text.literal("[YES, START]").formatted(Formatting.GREEN, Formatting.BOLD)
+                .styled(style -> style.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/promptconfirm")));
+        MutableText no = Text.literal("[NO, EDIT]").formatted(Formatting.RED, Formatting.BOLD)
+                .styled(style -> style.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/promptcraft " + prompt)));
 
-        MutableText separator = Text.literal(" ");
-
-        MutableText no = Text.translatable("promptcraft.message.prompt.no")
-                .formatted(Formatting.RED, Formatting.BOLD)
-                .styled(style -> style.withClickEvent(new ClickEvent(
-                        ClickEvent.Action.SUGGEST_COMMAND,
-                        "/promptcraft " + prompt
-                )));
-
-        player.sendMessage(Text.empty().append(yes).append(separator).append(no), false);
+        player.sendMessage(Text.empty().append(yes).append(Text.literal("  ")).append(no), false);
     }
 
     private static boolean validatePlayerCanUsePromptCraft(ServerPlayerEntity player) {
         if (!hasAccess(player)) {
-            player.sendMessage(Text.translatable("promptcraft.message.access_denied").formatted(Formatting.RED), false);
+            player.sendMessage(Text.literal("Access Denied.").formatted(Formatting.RED), false);
             return false;
         }
-
         if (!player.isCreative()) {
-            player.sendMessage(Text.translatable("promptcraft.message.creative_required").formatted(Formatting.RED), false);
+            player.sendMessage(Text.literal("You must be in creative mode.").formatted(Formatting.RED), false);
             return false;
         }
-
         return true;
     }
 
     private static boolean hasAccess(ServerPlayerEntity player) {
-        PromptCraftConfig config = PromptCraftConfigManager.get();
-
-        if (config.isAccessEveryone()) {
-            return true;
-        }
-
-        return player.hasPermissionLevel(2);
+        return PromptCraftConfigManager.get().isAccessEveryone() || player.hasPermissionLevel(2);
     }
 
     private static ServerPlayerEntity getPlayerOrFail(ServerCommandSource source) {
         try {
             return source.getPlayerOrThrow();
         } catch (Exception e) {
-            source.sendError(Text.literal("This command can only be used by a player."));
             return null;
         }
     }

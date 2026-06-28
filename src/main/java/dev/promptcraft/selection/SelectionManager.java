@@ -2,6 +2,7 @@ package dev.promptcraft.selection;
 
 import dev.promptcraft.config.PromptCraftConfig;
 import dev.promptcraft.config.PromptCraftConfigManager;
+import dev.promptcraft.network.PromptCraftNetworking;
 import net.minecraft.server.network.ServerPlayerEntity;
 
 import java.util.Map;
@@ -20,16 +21,13 @@ public final class SelectionManager {
 
     public static void clear(ServerPlayerEntity player) {
         SELECTIONS.remove(player.getUuid());
+        PromptCraftNetworking.syncSelection(player, new PlayerSelection());
     }
 
     public static boolean isWithinLimit(PlayerSelection selection) {
         PromptCraftConfig config = PromptCraftConfigManager.get();
 
-        if (!config.selectionLimitEnabled) {
-            return true;
-        }
-
-        if (!selection.isComplete()) {
+        if (!config.selectionLimitEnabled || !selection.isComplete()) {
             return true;
         }
 

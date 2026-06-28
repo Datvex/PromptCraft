@@ -8,6 +8,7 @@ public class PromptCraftConfig {
     public String accessMode = "admins_only";
 
     public boolean showProcessMessages = true;
+    public boolean enableDestructionAnimation = true;
 
     public boolean selectionLimitEnabled = true;
     public int maxSelectionWidth = 64;
