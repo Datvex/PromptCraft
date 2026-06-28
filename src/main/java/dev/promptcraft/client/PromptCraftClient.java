@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.*;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -46,14 +47,19 @@ public class PromptCraftClient implements ClientModInitializer {
             BlockPos pos2 = secondPos;
 
             if (showPreview && pos1 != null && pos2 == null) {
-                // Stable 64-block raycast fallback
-                HitResult hit = client.player.raycast(64.0D, context.tickDelta(), false);
-                pos2 = BlockPos.ofFloored(hit.getPos());
+                HitResult hit = client.crosshairTarget;
+                if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
+                    pos2 = ((BlockHitResult) hit).getBlockPos();
+                } else {
+                    // Safe fallback: project exactly 5 blocks forward if looking at air
+                    Vec3d eyePos = client.player.getCameraPosVec(context.tickDelta());
+                    Vec3d lookVec = client.player.getRotationVec(context.tickDelta());
+                    pos2 = BlockPos.ofFloored(eyePos.add(lookVec.multiply(5.0D)));
+                }
             }
 
             if (pos1 == null || pos2 == null) return;
 
-            // Parse hex color
             String hex = PromptCraftConfigManager.get().themeColor.replace("#", "");
             int color = 0x17b95f;
             try { color = Integer.parseInt(hex, 16); } catch (Exception ignored) {}
@@ -81,12 +87,10 @@ public class PromptCraftClient implements ClientModInitializer {
             RenderSystem.depthMask(false);
             RenderSystem.setShader(GameRenderer::getPositionColorProgram);
 
-            // Draw inner transparent box
             buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
             drawFilledBox(matrix, buffer, box, r, g, b, 0.2f);
             tessellator.draw();
 
-            // Draw THICK outline using 12 quads to bypass OpenGL line width limits
             buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
             drawThickOutline(matrix, buffer, box, 0.05f, r, g, b, 1.0f);
             tessellator.draw();
@@ -117,17 +121,14 @@ public class PromptCraftClient implements ClientModInitializer {
     private void drawThickOutline(Matrix4f matrix, BufferBuilder buffer, Box box, float t, float r, float g, float b, float a) {
         float x1 = (float)box.minX, y1 = (float)box.minY, z1 = (float)box.minZ;
         float x2 = (float)box.maxX, y2 = (float)box.maxY, z2 = (float)box.maxZ;
-        // Bottom edges
         drawFilledBox(matrix, buffer, new Box(x1-t, y1-t, z1-t, x2+t, y1+t, z1+t), r, g, b, a);
         drawFilledBox(matrix, buffer, new Box(x1-t, y1-t, z2-t, x2+t, y1+t, z2+t), r, g, b, a);
         drawFilledBox(matrix, buffer, new Box(x1-t, y1-t, z1-t, x1+t, y1+t, z2+t), r, g, b, a);
         drawFilledBox(matrix, buffer, new Box(x2-t, y1-t, z1-t, x2+t, y1+t, z2+t), r, g, b, a);
-        // Top edges
         drawFilledBox(matrix, buffer, new Box(x1-t, y2-t, z1-t, x2+t, y2+t, z1+t), r, g, b, a);
         drawFilledBox(matrix, buffer, new Box(x1-t, y2-t, z2-t, x2+t, y2+t, z2+t), r, g, b, a);
         drawFilledBox(matrix, buffer, new Box(x1-t, y2-t, z1-t, x1+t, y2+t, z2+t), r, g, b, a);
         drawFilledBox(matrix, buffer, new Box(x2-t, y2-t, z1-t, x2+t, y2+t, z2+t), r, g, b, a);
-        // Vertical edges
         drawFilledBox(matrix, buffer, new Box(x1-t, y1-t, z1-t, x1+t, y2+t, z1+t), r, g, b, a);
         drawFilledBox(matrix, buffer, new Box(x2-t, y1-t, z1-t, x2+t, y2+t, z1+t), r, g, b, a);
         drawFilledBox(matrix, buffer, new Box(x1-t, y1-t, z2-t, x1+t, y2+t, z2+t), r, g, b, a);

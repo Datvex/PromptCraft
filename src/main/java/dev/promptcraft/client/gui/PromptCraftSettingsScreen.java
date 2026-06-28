@@ -18,8 +18,8 @@ public class PromptCraftSettingsScreen extends Screen {
     
     private TextFieldWidget apiKeyField;
     private TextFieldWidget modelField;
-    private ButtonWidget previewButton;
-    private ButtonWidget saveButton;
+    private FlatButton previewButton;
+    private FlatButton saveButton;
 
     private String apiKey;
     private String model;
@@ -37,30 +37,32 @@ public class PromptCraftSettingsScreen extends Screen {
         int centerX = this.width / 2;
         int centerY = this.height / 2;
 
-        apiKeyField = new TextFieldWidget(this.textRenderer, centerX - 100, centerY - 45, 200, 20, Text.literal("API Key"));
+        apiKeyField = new TextFieldWidget(this.textRenderer, centerX - 90, centerY - 25, 180, 16, Text.literal("API Key"));
         apiKeyField.setMaxLength(100);
         apiKeyField.setText(apiKey);
+        apiKeyField.setDrawsBackground(false);
         this.addDrawableChild(apiKeyField);
 
-        modelField = new TextFieldWidget(this.textRenderer, centerX - 100, centerY + 5, 200, 20, Text.literal("Model"));
+        modelField = new TextFieldWidget(this.textRenderer, centerX - 90, centerY + 25, 180, 16, Text.literal("Model"));
         modelField.setMaxLength(100);
         modelField.setText(model);
+        modelField.setDrawsBackground(false);
         this.addDrawableChild(modelField);
 
-        previewButton = ButtonWidget.builder(Text.literal("Dynamic Preview: " + (showPreview ? "ON" : "OFF")), button -> {
+        previewButton = new FlatButton(centerX - 95, centerY + 55, 190, 20, Text.literal("Dynamic Preview: " + (showPreview ? "ON" : "OFF")), button -> {
             showPreview = !showPreview;
             button.setMessage(Text.literal("Dynamic Preview: " + (showPreview ? "ON" : "OFF")));
-        }).dimensions(centerX - 100, centerY + 45, 200, 20).build();
+        });
         this.addDrawableChild(previewButton);
 
-        saveButton = ButtonWidget.builder(Text.literal("Save & Close"), button -> {
+        saveButton = new FlatButton(centerX - 95, centerY + 85, 190, 20, Text.literal("Save & Close"), button -> {
             PacketByteBuf buf = PacketByteBufs.create();
             buf.writeString(apiKeyField.getText());
             buf.writeString(modelField.getText());
             buf.writeBoolean(showPreview);
             ClientPlayNetworking.send(PromptCraftNetworking.SAVE_GUI_PACKET, buf);
             this.client.setScreen(null);
-        }).dimensions(centerX - 100, centerY + 75, 200, 20).build();
+        });
         this.addDrawableChild(saveButton);
     }
 
@@ -68,7 +70,6 @@ public class PromptCraftSettingsScreen extends Screen {
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         this.renderBackground(context);
         
-        // Draw Custom Background Texture
         RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
         int bgWidth = 256;
         int bgHeight = 256;
@@ -76,15 +77,48 @@ public class PromptCraftSettingsScreen extends Screen {
         int y = (this.height - bgHeight) / 2;
         context.drawTexture(BG_TEXTURE, x, y, 0, 0, bgWidth, bgHeight);
 
-        // Get Theme Color for Text
         String hex = PromptCraftConfigManager.get().themeColor.replace("#", "");
         int color = 0x17B95F;
         try { color = Integer.parseInt(hex, 16); } catch (Exception ignored) {}
 
-        context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, y + 15, color);
-        context.drawTextWithShadow(this.textRenderer, Text.literal("NVIDIA API Key:"), this.width / 2 - 100, y + 40, color);
-        context.drawTextWithShadow(this.textRenderer, Text.literal("Model:"), this.width / 2 - 100, y + 80, color);
-        
+        int centerX = this.width / 2;
+        int centerY = this.height / 2;
+
+        context.drawCenteredTextWithShadow(this.textRenderer, this.title, centerX, y + 30, color);
+        context.drawTextWithShadow(this.textRenderer, Text.literal("NVIDIA API Key:"), centerX - 95, centerY - 40, color);
+        context.drawTextWithShadow(this.textRenderer, Text.literal("Model:"), centerX - 95, centerY + 10, color);
+
+        // Draw flat borders for text fields
+        context.fill(centerX - 95, centerY - 28, centerX + 95, centerY - 6, 0xFF1A1A1A);
+        context.drawBorder(centerX - 95, centerY - 28, 190, 22, 0xFF000000 | color);
+
+        context.fill(centerX - 95, centerY + 22, centerX + 95, centerY + 44, 0xFF1A1A1A);
+        context.drawBorder(centerX - 95, centerY + 22, 190, 22, 0xFF000000 | color);
+
         super.render(context, mouseX, mouseY, delta);
+    }
+
+    private class FlatButton extends ButtonWidget {
+        public FlatButton(int x, int y, int width, int height, Text message, PressAction onPress) {
+            super(x, y, width, height, message, onPress, DEFAULT_NARRATION_SUPPLIER);
+        }
+
+        @Override
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            String hex = PromptCraftConfigManager.get().themeColor.replace("#", "");
+            int themeColor = 0x17B95F;
+            try { themeColor = Integer.parseInt(hex, 16); } catch (Exception ignored) {}
+
+            int borderColor = 0xFF000000 | themeColor;
+            int bgColor = this.isHovered() ? (0x66000000 | themeColor) : 0xFF1A1A1A;
+            int textColor = this.isHovered() ? 0xFFFFFF : themeColor;
+
+            context.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height, bgColor);
+            context.drawBorder(this.getX(), this.getY(), this.width, this.height, borderColor);
+
+            int textX = this.getX() + (this.width - PromptCraftSettingsScreen.this.textRenderer.getWidth(this.getMessage())) / 2;
+            int textY = this.getY() + (this.height - 8) / 2;
+            context.drawTextWithShadow(PromptCraftSettingsScreen.this.textRenderer, this.getMessage(), textX, textY, textColor);
+        }
     }
 }
