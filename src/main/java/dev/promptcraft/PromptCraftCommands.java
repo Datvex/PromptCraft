@@ -1,6 +1,7 @@
 package dev.promptcraft;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
+import dev.promptcraft.ai.AiClient;
 import dev.promptcraft.config.PromptCraftConfig;
 import dev.promptcraft.config.PromptCraftConfigManager;
 import dev.promptcraft.config.PromptCraftEnv;
@@ -9,6 +10,7 @@ import dev.promptcraft.selection.SelectionManager;
 import dev.promptcraft.session.PendingPrompt;
 import dev.promptcraft.session.PromptSessionManager;
 import dev.promptcraft.structure.HistoryManager;
+import dev.promptcraft.task.BuildTask;
 import dev.promptcraft.task.DestructionTask;
 import dev.promptcraft.task.TaskManager;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -100,7 +102,17 @@ public final class PromptCraftCommands {
         player.sendMessage(Text.literal("Preparing area...").formatted(Formatting.YELLOW), false);
 
         TaskManager.addTask(new DestructionTask(player, prompt.getSelectionMin(), prompt.getSelectionMax(), () -> {
-            player.sendMessage(Text.literal("[AI Placeholder] Sent to NVIDIA API...").formatted(Formatting.AQUA), false);
+            player.sendMessage(Text.literal("Area cleared. Contacting AI...").formatted(Formatting.AQUA), false);
+            
+            AiClient.requestBuild(player, prompt.getPrompt(), prompt.getWidth(), prompt.getHeight(), prompt.getDepth())
+                .thenAccept(structure -> {
+                    if (structure != null && player.getServer() != null) {
+                        player.getServer().execute(() -> {
+                            player.sendMessage(Text.literal("AI response received! Building...").formatted(Formatting.GREEN), false);
+                            TaskManager.addTask(new BuildTask(player, prompt.getSelectionMin(), structure));
+                        });
+                    }
+                });
         }));
 
         return 1;
