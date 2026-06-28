@@ -42,8 +42,8 @@ java {
 }
 
 jar {
-    from sourceSets.main.output.classesDirs
-    from sourceSets.main.resources.srcDirs
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from sourceSets.main.output
     from("LICENSE") {
         rename { "${it}_${project.archives_base_name}" }
     }

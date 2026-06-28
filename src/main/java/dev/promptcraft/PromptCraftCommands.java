@@ -154,21 +154,8 @@ public final class PromptCraftCommands {
     private static int handlePromptSettings(ServerCommandSource source) {
         ServerPlayerEntity player = getPlayerOrFail(source);
         if (player == null || !hasAccess(player)) return 0;
-
-        PromptCraftConfig config = PromptCraftConfigManager.get();
-        String configDir = PromptCraftConfigManager.getConfigPath().getParent().toString();
-
-        MutableText folderLink = Text.literal("[Click here to open folder]")
-                .formatted(Formatting.AQUA, Formatting.UNDERLINE)
-                .styled(style -> style
-                        .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_FILE, configDir))
-                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Text.literal("Opens the folder to edit .env and config.json"))));
-
-        player.sendMessage(Text.literal("=== PromptCraft Settings ===").formatted(Formatting.GOLD), false);
-        player.sendMessage(Text.literal("Setup API Key: ").append(folderLink), false);
-        player.sendMessage(Text.literal("Provider: " + config.provider).formatted(Formatting.GRAY), false);
-        player.sendMessage(Text.literal("Model: " + config.model).formatted(Formatting.GRAY), false);
-        player.sendMessage(Text.literal("API Key: " + PromptCraftEnv.getMaskedNvidiaApiKeyStatus()).formatted(Formatting.GRAY), false);
+        
+        dev.promptcraft.network.PromptCraftNetworking.openSettingsGui(player);
         return 1;
     }
 

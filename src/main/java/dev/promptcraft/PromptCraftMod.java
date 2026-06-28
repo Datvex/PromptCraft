@@ -1,6 +1,7 @@
 package dev.promptcraft;
 
 import dev.promptcraft.config.PromptCraftConfigManager;
+import dev.promptcraft.network.PromptCraftNetworking;
 import dev.promptcraft.task.TaskManager;
 import net.fabricmc.api.ModInitializer;
 import org.slf4j.Logger;
@@ -17,6 +18,7 @@ public class PromptCraftMod implements ModInitializer {
         PromptCraftItems.register();
         PromptCraftItemGroups.register();
         PromptCraftCommands.register();
+        PromptCraftNetworking.registerServerReceivers();
         TaskManager.init();
         LOGGER.info("PromptCraft initialized.");
     }
