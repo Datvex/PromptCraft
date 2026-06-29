@@ -1,5 +1,10 @@
 package dev.promptcraft.client.gui;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import dev.promptcraft.PromptCraftMod;
 import dev.promptcraft.network.PromptCraftNetworking;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
@@ -9,14 +14,25 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.ArrayList;
+import java.util.List;
 
 public class PromptCraftSettingsScreen extends Screen {
+    private static final Identifier REFRESH_ICON = new Identifier(PromptCraftMod.MOD_ID, "textures/gui/refresh_icon.png");
+
     private TextFieldWidget apiKeyField;
     private TextFieldWidget modelField;
     private FlatButton previewButton;
     private FlatButton saveButton;
     private FlatButton langButton;
     private TextFieldWidget hexColorField;
+    private IconButton refreshButton;
 
     private String apiKey;
     private String model;
@@ -38,6 +54,17 @@ public class PromptCraftSettingsScreen extends Screen {
 
     private boolean langMenuOpen = false;
     
+    // API Variables
+    private boolean isFetchingModels = false;
+    private String fetchError = null;
+    private boolean modelMenuOpen = false;
+    private List<String> fetchedModels = new ArrayList<>();
+    private List<String> filteredModels = new ArrayList<>(); // Отфильтрованный список
+    private int modelScroll = 0;
+    private boolean draggingModelScroll = false; // Для перетаскивания скроллбара
+    private TextFieldWidget modelSearchField; // Поле поиска
+
+    // Color Picker Variables
     private float pickerHue = 0.33f;    
     private float pickerSat = 0.85f;
     private float pickerVal = 0.72f;
@@ -72,11 +99,8 @@ public class PromptCraftSettingsScreen extends Screen {
     }
 
     private int parseThemeColor(String hex) {
-        try {
-            return 0xFF000000 | Integer.parseInt(hex.replace("#", ""), 16);
-        } catch (Exception e) {
-            return 0xFF17B95F;
-        }
+        try { return 0xFF000000 | Integer.parseInt(hex.replace("#", ""), 16); } 
+        catch (Exception e) { return 0xFF17B95F; }
     }
 
     @Override
@@ -87,17 +111,20 @@ public class PromptCraftSettingsScreen extends Screen {
         int contentX = centerX - 30;
         int contentY = menuY;
 
-        apiKeyField = new TextFieldWidget(this.textRenderer, contentX, contentY + 15, 180, 16, Text.literal("API Key"));
+        apiKeyField = new TextFieldWidget(this.textRenderer, contentX - 5, contentY + 15, 185, 16, Text.literal("API Key"));
         apiKeyField.setMaxLength(100);
         apiKeyField.setText(apiKey);
         apiKeyField.setDrawsBackground(false);
         this.addDrawableChild(apiKeyField);
 
-        modelField = new TextFieldWidget(this.textRenderer, contentX, contentY + 60, 180, 16, Text.literal("Model"));
+        modelField = new TextFieldWidget(this.textRenderer, contentX - 5, contentY + 60, 160, 16, Text.literal("Model"));
         modelField.setMaxLength(100);
         modelField.setText(model);
         modelField.setDrawsBackground(false);
         this.addDrawableChild(modelField);
+
+        refreshButton = new IconButton(contentX + 160, contentY + 58, 20, 20, REFRESH_ICON, button -> fetchModels());
+        this.addDrawableChild(refreshButton);
 
         previewButton = new FlatButton(contentX - 5, contentY + 5, 190, 20, Text.literal(t("Dynamic Preview: ", "Динамический предпросмотр: ") + (showPreview ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"))), button -> {
             showPreview = !showPreview;
@@ -105,12 +132,9 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(previewButton);
         
-        langButton = new FlatButton(contentX - 5, contentY + 30, 190, 20, Text.literal(t("Change language", "Изменить язык")), button -> {
-            langMenuOpen = !langMenuOpen;
-        });
+        langButton = new FlatButton(contentX - 5, contentY + 30, 190, 20, Text.literal(t("Change language", "Изменить язык")), button -> langMenuOpen = !langMenuOpen);
         this.addDrawableChild(langButton);        
         
-        // Делаем поле с запасом ширины (60), чтобы текст не уезжал за края при вводе
         hexColorField = new TextFieldWidget(this.textRenderer, contentX + 10, contentY + 95, 60, 16, Text.literal("Hex"));
         hexColorField.setMaxLength(7);
         hexColorField.setText(themeColor);
@@ -137,9 +161,69 @@ public class PromptCraftSettingsScreen extends Screen {
             this.client.setScreen(null);
         });
         this.addDrawableChild(saveButton);
+
+        // Инициализация поля поиска моделей (внутри оверлея)
+        int overlayW = 260; int overlayH = 160;
+        int ox = centerX - overlayW / 2; int oy = centerY - overlayH / 2;
+        modelSearchField = new TextFieldWidget(this.textRenderer, ox + 110, oy + 5, 120, 14, Text.literal("Search"));
+        modelSearchField.setDrawsBackground(true);
+        modelSearchField.setMaxLength(50);
+        modelSearchField.setChangedListener(text -> filterModels());
         
         updateWidgetVisibility();
     }    
+
+    private void filterModels() {
+        String query = modelSearchField.getText().toLowerCase();
+        filteredModels.clear();
+        for (String m : fetchedModels) {
+            if (m.toLowerCase().contains(query)) {
+                filteredModels.add(m);
+            }
+        }
+        modelScroll = 0; // Сбрасываем скролл при поиске
+    }
+
+    private void fetchModels() {
+        if (isFetchingModels) return;
+        String key = apiKeyField.getText().trim();
+        if (key.isEmpty()) { fetchError = t("API key is empty!", "API ключ пуст!"); return; }
+
+        isFetchingModels = true; fetchError = null;
+
+        HttpClient httpClient = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://integrate.api.nvidia.com/v1/models"))
+                .header("Authorization", "Bearer " + key)
+                .GET().build();
+
+        httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString()).thenAccept(response -> {
+            if (response.statusCode() == 200) {
+                try {
+                    JsonObject root = JsonParser.parseString(response.body()).getAsJsonObject();
+                    JsonArray data = root.getAsJsonArray("data");
+                    List<String> models = new ArrayList<>();
+                    for (JsonElement e : data) models.add(e.getAsJsonObject().get("id").getAsString());
+                    
+                    if (this.client != null) this.client.execute(() -> {
+                        fetchedModels = models;
+                        filteredModels = new ArrayList<>(models);
+                        modelSearchField.setText("");
+                        modelScroll = 0;
+                        modelMenuOpen = true;
+                        isFetchingModels = false;
+                    });
+                } catch (Exception ex) {
+                    if (this.client != null) this.client.execute(() -> { fetchError = "Parse Error!"; isFetchingModels = false; });
+                }
+            } else {
+                if (this.client != null) this.client.execute(() -> { fetchError = "Error: " + response.statusCode(); isFetchingModels = false; });
+            }
+        }).exceptionally(ex -> {
+            if (this.client != null) this.client.execute(() -> { fetchError = "Network Error!"; isFetchingModels = false; });
+            return null;
+        });
+    }
     
     private void updateWidgetVisibility() {
         boolean isApi = selectedTab == TAB_API;
@@ -147,43 +231,82 @@ public class PromptCraftSettingsScreen extends Screen {
         boolean isLang = selectedTab == TAB_LANG;
         boolean isTheme = selectedTab == TAB_THEME;
         
-        apiKeyField.visible = isApi;
-        apiKeyField.active = isApi;
-        modelField.visible = isApi;
-        modelField.active = isApi;
-        
-        previewButton.visible = isAnim;
-        previewButton.active = isAnim;
-        
-        langButton.visible = isLang;
-        langButton.active = isLang;
-        
-        hexColorField.visible = isTheme;
-        hexColorField.active = isTheme;
+        apiKeyField.visible = isApi; apiKeyField.active = isApi;
+        modelField.visible = isApi; modelField.active = isApi;
+        refreshButton.visible = isApi; refreshButton.active = isApi;
+        previewButton.visible = isAnim; previewButton.active = isAnim;
+        langButton.visible = isLang; langButton.active = isLang;
+        hexColorField.visible = isTheme; hexColorField.active = isTheme;
     }
     
+    // --- ПЕРЕХВАТ КЛАВИАТУРЫ ДЛЯ ПОЛЯ ПОИСКА ---
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (modelMenuOpen && modelSearchField.keyPressed(keyCode, scanCode, modifiers)) return true;
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean charTyped(char chr, int modifiers) {
+        if (modelMenuOpen && modelSearchField.charTyped(chr, modifiers)) return true;
+        return super.charTyped(chr, modifiers);
+    }
+
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        int centerX = this.width / 2;
-        int centerY = this.height / 2;
-        int menuX = centerX - 180;
-        int menuY = centerY - 60;
-        int contentX = centerX - 30;
-        int contentY = menuY;
-        
-        if (langMenuOpen) {
-            int overlayW = 200;
-            int overlayH = 90;
-            int ox = centerX - overlayW / 2;
-            int oy = centerY - overlayH / 2;
-            
-            int closeBtnX = ox + overlayW - 22;
-            int closeBtnY = oy + 4;
-            if (mouseX >= closeBtnX && mouseX <= closeBtnX + 18 && mouseY >= closeBtnY && mouseY <= closeBtnY + 14) {
-                langMenuOpen = false;
+        int centerX = this.width / 2; int centerY = this.height / 2;
+        int menuX = centerX - 180; int menuY = centerY - 60;
+        int contentX = centerX - 30; int contentY = menuY;
+
+        if (modelMenuOpen) {
+            int overlayW = 260; int overlayH = 160;
+            int ox = centerX - overlayW / 2; int oy = centerY - overlayH / 2;
+
+            // Клик по полю поиска
+            if (modelSearchField.mouseClicked(mouseX, mouseY, button)) return true;
+
+            // Клик по крестику
+            int closeX = ox + overlayW - 22; int closeY = oy + 5;
+            if (mouseX >= closeX && mouseX <= closeX + 18 && mouseY >= closeY && mouseY <= closeY + 14) {
+                modelMenuOpen = false; return true;
+            }
+
+            // Клик по скроллбару (начинаем перетаскивание)
+            int listY = oy + 25; int listH = 120;
+            if (mouseX >= ox + overlayW - 10 && mouseX <= ox + overlayW - 5 && mouseY >= listY && mouseY <= listY + listH) {
+                draggingModelScroll = true;
+                updateModelScroll(mouseY, listY, listH);
                 return true;
             }
+
+            // Клик по элементу списка
+            int itemH = 15;
+            int visibleCount = listH / itemH;
+            for (int i = 0; i < visibleCount; i++) {
+                int index = modelScroll + i;
+                if (index >= filteredModels.size()) break;
+                int itemY = listY + i * itemH;
+                if (mouseX >= ox + 10 && mouseX <= ox + overlayW - 15 && mouseY >= itemY && mouseY <= itemY + itemH) {
+                    modelField.setText(filteredModels.get(index));
+                    modelMenuOpen = false;
+                    return true;
+                }
+            }
             
+            // Если кликнули мимо списка, но в рамках оверлея — ничего не делаем
+            if (mouseX >= ox && mouseX <= ox + overlayW && mouseY >= oy && mouseY <= oy + overlayH) return true;
+            
+            // Клик вне оверлея — закрываем
+            modelMenuOpen = false; return true;
+        }
+        
+        if (langMenuOpen) {
+            int overlayW = 200; int overlayH = 90;
+            int ox = centerX - overlayW / 2; int oy = centerY - overlayH / 2;
+            int closeBtnX = ox + overlayW - 22; int closeBtnY = oy + 4;
+            if (mouseX >= closeBtnX && mouseX <= closeBtnX + 18 && mouseY >= closeBtnY && mouseY <= closeBtnY + 14) {
+                langMenuOpen = false; return true;
+            }
             for (int i = 0; i < LANG_OPTIONS.length; i++) {
                 int itemY = oy + 32 + i * 22;
                 if (mouseX >= ox + 10 && mouseX <= ox + overlayW - 10 && mouseY >= itemY && mouseY <= itemY + 20) {
@@ -195,10 +318,8 @@ public class PromptCraftSettingsScreen extends Screen {
                     return true;
                 }
             }
-            
             if (mouseX < ox || mouseX > ox + overlayW || mouseY < oy || mouseY > oy + overlayH) {
-                langMenuOpen = false;
-                return true;
+                langMenuOpen = false; return true;
             }
             return true;
         }        
@@ -207,68 +328,76 @@ public class PromptCraftSettingsScreen extends Screen {
             for (int i = 0; i < 4; i++) {
                 int ty = menuY + i * 25;
                 if (mouseY >= ty && mouseY <= ty + 20) {
-                    selectedTab = i;
-                    updateWidgetVisibility();
-                    return true;
+                    selectedTab = i; updateWidgetVisibility(); return true;
                 }
             }
         }
         
         if (selectedTab == TAB_THEME) {
-            int svX = contentX;
-            int svY = contentY + 5;
-            int hueX = svX + SV_SIZE + 8;
-            int hueY = svY;
-            
+            int svX = contentX; int svY = contentY + 5;
+            int hueX = svX + SV_SIZE + 8; int hueY = svY;
             if (mouseX >= svX && mouseX <= svX + SV_SIZE && mouseY >= svY && mouseY <= svY + SV_SIZE) {
-                draggingSV = true;
-                updateSV(mouseX, mouseY, svX, svY);
-                return true;
+                draggingSV = true; updateSV(mouseX, mouseY, svX, svY); return true;
             }
             if (mouseX >= hueX && mouseX <= hueX + HUE_W && mouseY >= hueY && mouseY <= hueY + HUE_H) {
-                draggingHue = true;
-                updateHue(mouseY, hueY);
-                return true;
+                draggingHue = true; updateHue(mouseY, hueY); return true;
             }
         }
-        
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
+        if (modelMenuOpen && !filteredModels.isEmpty()) {
+            modelScroll -= (int) amount;
+            int maxScroll = Math.max(0, filteredModels.size() - (120 / 15));
+            if (modelScroll < 0) modelScroll = 0;
+            if (modelScroll > maxScroll) modelScroll = maxScroll;
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, amount);
     }
     
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        draggingHue = false;
-        draggingSV = false;
+        draggingHue = false; draggingSV = false; draggingModelScroll = false;
         return super.mouseReleased(mouseX, mouseY, button);
     }
     
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+        if (draggingModelScroll) {
+            int cy = this.height / 2;
+            int oy = cy - 80; // overlayH / 2
+            int listY = oy + 25; int listH = 120;
+            updateModelScroll(mouseY, listY, listH);
+            return true;
+        }
+
         if (selectedTab == TAB_THEME) {
-            int centerX = this.width / 2;
-            int centerY = this.height / 2;
-            int contentX = centerX - 30;
-            int contentY = centerY - 60;
-            int svX = contentX;
-            int svY = contentY + 5;
-            int hueY = svY;
-            if (draggingSV) {                
-                updateSV(mouseX, mouseY, svX, svY);
-                return true;
-            }
-            if (draggingHue) {
-                updateHue(mouseY, hueY);
-                return true;
-            }
+            int contentX = this.width / 2 - 30; int contentY = this.height / 2 - 60;
+            if (draggingSV) { updateSV(mouseX, mouseY, contentX, contentY + 5); return true; }
+            if (draggingHue) { updateHue(mouseY, contentY + 5); return true; }
         }
         return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
     }
+
+    private void updateModelScroll(double mouseY, int listY, int listH) {
+        int visibleCount = listH / 15;
+        int maxScroll = Math.max(0, filteredModels.size() - visibleCount);
+        if (maxScroll == 0) { modelScroll = 0; return; }
+        
+        float trackHeight = listH - 20f; // 20 - высота самого ползунка
+        float deltaY = (float) (mouseY - listY - 10f); // Центрируем по мышке
+        float fraction = deltaY / trackHeight;
+        fraction = Math.max(0, Math.min(1, fraction));
+        
+        modelScroll = Math.round(fraction * maxScroll);
+    }
     
     private void updateSV(double mouseX, double mouseY, int svX, int svY) {
-        float s = Math.max(0, Math.min(1, (float) (mouseX - svX) / SV_SIZE));
-        float v = Math.max(0, Math.min(1, 1f - (float) (mouseY - svY) / SV_SIZE));
-        pickerSat = s;
-        pickerVal = v;
+        pickerSat = Math.max(0, Math.min(1, (float) (mouseX - svX) / SV_SIZE));
+        pickerVal = Math.max(0, Math.min(1, 1f - (float) (mouseY - svY) / SV_SIZE));
         themeColor = hsvToHex(pickerHue, pickerSat, pickerVal);
         hexColorField.setText(themeColor);
     }
@@ -283,20 +412,15 @@ public class PromptCraftSettingsScreen extends Screen {
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         this.renderBackground(context);
 
-        int centerX = this.width / 2;
-        int centerY = this.height / 2;
-        int menuX = centerX - 180;
-        int menuY = centerY - 60;
-        int contentX = centerX - 30;
-        int contentY = menuY;
+        int centerX = this.width / 2; int centerY = this.height / 2;
+        int menuX = centerX - 180; int menuY = centerY - 60;
+        int contentX = centerX - 30; int contentY = menuY;
         
         context.fill(centerX - 200, centerY - 100, centerX + 200, centerY + 120, 0xFF1E1E1E);
-        
         context.drawTextWithShadow(this.textRenderer, t("Settings", "Настройки"), menuX, centerY - 85, 0xFFFFFF);
         context.drawTextWithShadow(this.textRenderer, "esc", centerX + 170, centerY - 85, 0x6E6E6E);
         
         int themeColorInt = parseThemeColor(themeColor);
-        
         renderMenuItem(context, tabName(0), menuX, menuY, selectedTab == TAB_API, themeColorInt);
         renderMenuItem(context, tabName(1), menuX, menuY + 25, selectedTab == TAB_ANIM, themeColorInt);
         renderMenuItem(context, tabName(2), menuX, menuY + 50, selectedTab == TAB_LANG, themeColorInt);
@@ -307,36 +431,36 @@ public class PromptCraftSettingsScreen extends Screen {
             context.drawTextWithShadow(this.textRenderer, "Model:", contentX - 5, contentY + 45, 0xFFFFFF);
 
             context.fill(contentX - 5, contentY + 12, contentX + 185, contentY + 34, 0xFF2D2D2D);
-            context.fill(contentX - 5, contentY + 57, contentX + 185, contentY + 79, 0xFF2D2D2D);
+            context.fill(contentX - 5, contentY + 57, contentX + 155, contentY + 79, 0xFF2D2D2D);
+
+            if (isFetchingModels) {
+                context.drawTextWithShadow(this.textRenderer, t("Fetching...", "Загрузка..."), contentX - 5, contentY + 85, 0xAAAAAA);
+            } else if (fetchError != null) {
+                context.drawTextWithShadow(this.textRenderer, fetchError, contentX - 5, contentY + 85, 0xFF5555);
+            }
         } else if (selectedTab == TAB_LANG) {
             context.drawTextWithShadow(this.textRenderer, t("Current language:", "Текущий язык:"), contentX - 5, contentY, 0xFFFFFF);
             context.drawTextWithShadow(this.textRenderer, "ru".equals(language) ? "Русский" : "English", contentX - 5, contentY + 12, themeColorInt);
         } else if (selectedTab == TAB_THEME) {
             renderColorPicker(context, contentX, contentY + 5);
             context.fill(contentX, contentY + 92, contentX + SV_SIZE, contentY + 112, 0xFF2D2D2D);
-            
-            // Динамически высчитываем пиксели и ставим поле ровно в центр
             int textW = this.textRenderer.getWidth(hexColorField.getText());
             hexColorField.setX(contentX + (80 - textW) / 2);
         }        
         
         super.render(context, mouseX, mouseY, delta);
 
-        if (langMenuOpen) {
-            renderLangMenu(context);
-        }
+        if (langMenuOpen) renderLangMenu(context);
+        if (modelMenuOpen) renderModelMenu(context, mouseX, mouseY, delta);
     }    
-    
-    private void renderLangMenu(DrawContext context) {
+
+    private void renderModelMenu(DrawContext context, int mouseX, int mouseY, float delta) {
         context.getMatrices().push();
         context.getMatrices().translate(0.0f, 0.0f, 400.0f);
 
-        int cx = this.width / 2;
-        int cy = this.height / 2;
-        int overlayW = 200;
-        int overlayH = 90;
-        int ox = cx - overlayW / 2;
-        int oy = cy - overlayH / 2;
+        int cx = this.width / 2; int cy = this.height / 2;
+        int overlayW = 260; int overlayH = 160;
+        int ox = cx - overlayW / 2; int oy = cy - overlayH / 2;
         
         context.fill(0, 0, this.width, this.height, 0x80000000);
         
@@ -346,18 +470,79 @@ public class PromptCraftSettingsScreen extends Screen {
         context.fill(ox, oy, ox + 1, oy + overlayH, 0xFF555555);
         context.fill(ox + overlayW - 1, oy, ox + overlayW, oy + overlayH, 0xFF111111);
         
+        context.drawTextWithShadow(this.textRenderer, t("Select Model", "Выберите модель"), ox + 10, oy + 8, 0xFFFFFF);
+        
+        // Рендер текстового поля поиска (внутри поднятой матрицы)
+        modelSearchField.render(context, mouseX, mouseY, delta);
+        
+        // Плейсхолдер Search...
+        if (modelSearchField.getText().isEmpty() && !modelSearchField.isFocused()) {
+            context.drawTextWithShadow(this.textRenderer, "Search...", modelSearchField.getX() + 4, modelSearchField.getY() + 3, 0xAAAAAA);
+        }
+
+        int closeX = ox + overlayW - 22; int closeY = oy + 5;
+        context.fill(closeX, closeY, closeX + 18, closeY + 14, 0xFF2D2D2D);
+        context.drawText(this.textRenderer, "X", closeX + 6, closeY + 3, 0xFFAAAAAA, false);
+        
+        int listY = oy + 25; int listH = 120; int itemH = 15;
+        int visibleCount = listH / itemH;
+        int themeColorInt = parseThemeColor(themeColor);
+        
+        for (int i = 0; i < visibleCount; i++) {
+            int index = modelScroll + i;
+            if (index >= filteredModels.size()) break;
+            
+            String modId = filteredModels.get(index);
+            int itemY = listY + i * itemH;
+            
+            boolean hovered = mouseX >= ox + 10 && mouseX <= ox + overlayW - 15 && mouseY >= itemY && mouseY <= itemY + itemH;
+            int bgColor = hovered ? themeColorInt : 0xFF2D2D2D;
+            int textColor = hovered ? 0x000000 : 0xD2D2D2;
+            
+            context.fill(ox + 10, itemY, ox + overlayW - 15, itemY + itemH, bgColor);
+            if (hovered) {
+                context.drawText(this.textRenderer, modId, ox + 15, itemY + 4, textColor, false);
+            } else {
+                context.drawTextWithShadow(this.textRenderer, modId, ox + 15, itemY + 4, textColor);
+            }
+        }
+        
+        int maxScroll = Math.max(0, filteredModels.size() - visibleCount);
+        if (maxScroll > 0) {
+            int scrollBarY = listY + (int) ((modelScroll / (float) maxScroll) * (listH - 20));
+            context.fill(ox + overlayW - 10, listY, ox + overlayW - 5, listY + listH, 0xFF111111);
+            context.fill(ox + overlayW - 10, scrollBarY, ox + overlayW - 5, scrollBarY + 20, themeColorInt);
+        }
+
+        context.getMatrices().pop();
+    }
+    
+    // ==========================================
+    // НИЖЕ ВСЕ ВЕРНУВШИЕСЯ МЕТОДЫ (НЕ МЕНЯЛИСЬ)
+    // ==========================================
+    
+    private void renderLangMenu(DrawContext context) {
+        context.getMatrices().push();
+        context.getMatrices().translate(0.0f, 0.0f, 400.0f);
+        int cx = this.width / 2; int cy = this.height / 2;
+        int overlayW = 200; int overlayH = 90;
+        int ox = cx - overlayW / 2; int oy = cy - overlayH / 2;
+        
+        context.fill(0, 0, this.width, this.height, 0x80000000);
+        context.fill(ox, oy, ox + overlayW, oy + overlayH, 0xFF1E1E1E);
+        context.fill(ox, oy, ox + overlayW, oy + 1, 0xFF555555);
+        context.fill(ox, oy + overlayH - 1, ox + overlayW, oy + overlayH, 0xFF111111);
+        context.fill(ox, oy, ox + 1, oy + overlayH, 0xFF555555);
+        context.fill(ox + overlayW - 1, oy, ox + overlayW, oy + overlayH, 0xFF111111);
+        
         String title = t("Select Language", "Выберите язык");
         context.drawTextWithShadow(this.textRenderer, title, ox + 10, oy + 6, 0xFFFFFF);
         
-        int closeX = ox + overlayW - 22;
-        int closeY = oy + 5;
+        int closeX = ox + overlayW - 22; int closeY = oy + 5;
         context.fill(closeX, closeY, closeX + 18, closeY + 14, 0xFF2D2D2D);
-        context.fill(closeX, closeY, closeX + 18, closeY + 1, 0xFF444444);
-        context.fill(closeX, closeY + 13, closeX + 18, closeY + 14, 0xFF222222);
         context.drawText(this.textRenderer, "X", closeX + 6, closeY + 3, 0xFFAAAAAA, false);
         
         int themeColorInt = parseThemeColor(themeColor);
-        
         for (int i = 0; i < LANG_OPTIONS.length; i++) {
             int itemY = oy + 30 + i * 22;
             boolean sel = LANG_CODES[i].equals(language);
@@ -369,24 +554,16 @@ public class PromptCraftSettingsScreen extends Screen {
                 context.drawTextWithShadow(this.textRenderer, LANG_OPTIONS[i], ox + 16, itemY + 6, 0xD2D2D2);
             }
         }
-
         context.getMatrices().pop();
     }    
     
     private void renderColorPicker(DrawContext context, int x, int y) {
-        int svX = x;
-        int svY = y;
-        int hueX = svX + SV_SIZE + 8;
-        int hueY = svY;
-        
+        int svX = x; int svY = y; int hueX = svX + SV_SIZE + 8; int hueY = svY;
         for (int row = 0; row < SV_CELLS; row++) {
             for (int col = 0; col < SV_CELLS; col++) {
-                float s = col / (float) SV_CELLS;
-                float v = 1f - row / (float) SV_CELLS;
+                float s = col / (float) SV_CELLS; float v = 1f - row / (float) SV_CELLS;
                 int color = hsvToRgb(pickerHue, s, v);
-                context.fill(svX + col * CELL_SIZE, svY + row * CELL_SIZE,
-                             svX + col * CELL_SIZE + CELL_SIZE, svY + row * CELL_SIZE + CELL_SIZE,
-                             0xFF000000 | color);
+                context.fill(svX + col * CELL_SIZE, svY + row * CELL_SIZE, svX + col * CELL_SIZE + CELL_SIZE, svY + row * CELL_SIZE + CELL_SIZE, 0xFF000000 | color);
             }
         }
         context.fill(svX - 1, svY - 1, svX + SV_SIZE + 1, svY, 0xFF555555);
@@ -396,8 +573,7 @@ public class PromptCraftSettingsScreen extends Screen {
         
         int segH = HUE_H / HUE_SEGMENTS;
         for (int i = 0; i < HUE_SEGMENTS; i++) {
-            float h = i / (float) HUE_SEGMENTS;
-            int c = hsvToRgb(h, 1f, 1f);
+            float h = i / (float) HUE_SEGMENTS; int c = hsvToRgb(h, 1f, 1f);
             context.fill(hueX, hueY + i * segH, hueX + HUE_W, hueY + i * segH + segH, 0xFF000000 | c);
         }
         context.fill(hueX - 1, hueY - 1, hueX + HUE_W + 1, hueY, 0xFF555555);
@@ -409,16 +585,14 @@ public class PromptCraftSettingsScreen extends Screen {
         context.fill(hueX - 3, hueIndicatorY - 1, hueX + HUE_W + 3, hueIndicatorY + 2, 0xFFFFFFFF);
         context.fill(hueX - 2, hueIndicatorY, hueX + HUE_W + 2, hueIndicatorY + 1, 0xFF000000);
         
-        int svIndX = svX + (int) (pickerSat * SV_SIZE);
-        int svIndY = svY + (int) ((1f - pickerVal) * SV_SIZE);
+        int svIndX = svX + (int) (pickerSat * SV_SIZE); int svIndY = svY + (int) ((1f - pickerVal) * SV_SIZE);
         context.fill(svIndX - 2, svIndY - 2, svIndX + 3, svIndY - 1, 0xFFFFFFFF);
         context.fill(svIndX - 2, svIndY + 2, svIndX + 3, svIndY + 3, 0xFFFFFFFF);
         context.fill(svIndX - 2, svIndY - 1, svIndX - 1, svIndY + 2, 0xFFFFFFFF);
         context.fill(svIndX + 2, svIndY - 1, svIndX + 3, svIndY + 2, 0xFFFFFFFF);
         context.fill(svIndX - 1, svIndY - 1, svIndX + 2, svIndY + 2, 0xFF000000);
         
-        int previewX = hueX + HUE_W + 12;
-        int previewY = hueY;
+        int previewX = hueX + HUE_W + 12; int previewY = hueY;
         context.fill(previewX, previewY, previewX + PREVIEW_SIZE, previewY + PREVIEW_SIZE, parseThemeColor(themeColor));
         context.fill(previewX, previewY, previewX + PREVIEW_SIZE, previewY + 1, 0xFF555555);
         context.fill(previewX, previewY + PREVIEW_SIZE - 1, previewX + PREVIEW_SIZE, previewY + PREVIEW_SIZE, 0xFF111111);
@@ -438,47 +612,29 @@ public class PromptCraftSettingsScreen extends Screen {
     private void hexToHsv(String hex) {
         try {
             int rgb = Integer.parseInt(hex.replace("#", ""), 16);
-            int r = (rgb >> 16) & 0xFF;
-            int g = (rgb >> 8) & 0xFF;
-            int b = rgb & 0xFF;
-            float max = Math.max(r, Math.max(g, b)) / 255f;
-            float min = Math.min(r, Math.min(g, b)) / 255f;
-            pickerVal = max;
-            float d = max - min;
-            if (d == 0) {
-                pickerHue = 0; pickerSat = 0;
-            } else {
-                pickerSat = d / max;
-                float h;
+            int r = (rgb >> 16) & 0xFF; int g = (rgb >> 8) & 0xFF; int b = rgb & 0xFF;
+            float max = Math.max(r, Math.max(g, b)) / 255f; float min = Math.min(r, Math.min(g, b)) / 255f;
+            pickerVal = max; float d = max - min;
+            if (d == 0) { pickerHue = 0; pickerSat = 0; } else {
+                pickerSat = d / max; float h;
                 if (max == r / 255f) h = ((g / 255f - b / 255f) / d + 6) % 6;
                 else if (max == g / 255f) h = (b / 255f - r / 255f) / d + 2;
                 else h = (r / 255f - g / 255f) / d + 4;
                 pickerHue = h / 6f;
             }
-        } catch (Exception ignored) {
-            pickerHue = 0.33f; pickerSat = 0.85f; pickerVal = 0.72f;
-        }
+        } catch (Exception ignored) { pickerHue = 0.33f; pickerSat = 0.85f; pickerVal = 0.72f; }
     }
     
-    private String hsvToHex(float h, float s, float v) {
-        int rgb = hsvToRgb(h, s, v);
-        return String.format("#%06X", rgb);
-    }
+    private String hsvToHex(float h, float s, float v) { return String.format("#%06X", hsvToRgb(h, s, v)); }
     
     private int hsvToRgb(float h, float s, float v) {
-        int i = (int) (h * 6);
-        float f = h * 6 - i;
-        float p = v * (1 - s);
-        float q = v * (1 - f * s);
-        float t = v * (1 - (1 - f) * s);
+        int i = (int) (h * 6); float f = h * 6 - i;
+        float p = v * (1 - s); float q = v * (1 - f * s); float t = v * (1 - (1 - f) * s);
         float r = 0, g = 0, b = 0;
         switch (i % 6) {
-            case 0: r = v; g = t; b = p; break;
-            case 1: r = q; g = v; b = p; break;
-            case 2: r = p; g = v; b = t; break;
-            case 3: r = p; g = q; b = v; break;
-            case 4: r = t; g = p; b = v; break;
-            case 5: r = v; g = p; b = q; break;
+            case 0: r = v; g = t; b = p; break; case 1: r = q; g = v; b = p; break;
+            case 2: r = p; g = v; b = t; break; case 3: r = p; g = q; b = v; break;
+            case 4: r = t; g = p; b = v; break; case 5: r = v; g = p; b = q; break;
         }
         return ((int)(r * 255) << 16) | ((int)(g * 255) << 8) | (int)(b * 255);
     }
@@ -487,19 +643,34 @@ public class PromptCraftSettingsScreen extends Screen {
         public FlatButton(int x, int y, int width, int height, Text message, PressAction onPress) {
             super(x, y, width, height, message, onPress, DEFAULT_NARRATION_SUPPLIER);
         }
-
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             if (!this.visible) return;
-            
             int bgColor = this.isHovered() ? 0xFF3D3D3D : 0xFF2D2D2D;
             int textColor = this.isHovered() ? 0xFFFFFF : 0xD2D2D2;
-
             context.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height, bgColor);
-
             int textX = this.getX() + (this.width - PromptCraftSettingsScreen.this.textRenderer.getWidth(this.getMessage())) / 2;
             int textY = this.getY() + (this.height - 8) / 2;
             context.drawTextWithShadow(PromptCraftSettingsScreen.this.textRenderer, this.getMessage(), textX, textY, textColor);
+        }
+    }
+
+    private class IconButton extends ButtonWidget {
+        private final Identifier texture;
+        public IconButton(int x, int y, int width, int height, Identifier texture, PressAction onPress) {
+            super(x, y, width, height, Text.empty(), onPress, DEFAULT_NARRATION_SUPPLIER);
+            this.texture = texture;
+        }
+        @Override
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            if (!this.visible) return;
+            int bgColor = this.isHovered() ? 0xFF3D3D3D : 0xFF2D2D2D;
+            context.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height, bgColor);
+            context.getMatrices().push();
+            context.getMatrices().translate(this.getX() + 2, this.getY() + 2, 0);
+            context.getMatrices().scale(0.5f, 0.5f, 1.0f);
+            context.drawTexture(texture, 0, 0, 0, 0, 32, 32, 32, 32);
+            context.getMatrices().pop();
         }
     }
 }
