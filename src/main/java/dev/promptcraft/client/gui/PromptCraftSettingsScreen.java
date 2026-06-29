@@ -15,6 +15,7 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import org.lwjgl.glfw.GLFW;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -26,8 +27,8 @@ import java.util.List;
 public class PromptCraftSettingsScreen extends Screen {
     private static final Identifier REFRESH_ICON = new Identifier(PromptCraftMod.MOD_ID, "textures/gui/refresh_icon.png");
 
-    private TextFieldWidget apiKeyField;
-    private TextFieldWidget modelField;
+    private PasswordFieldWidget apiKeyField;
+    private ModelSelectButton modelButton;
     private FlatButton previewButton;
     private FlatButton saveButton;
     private FlatButton langButton;
@@ -103,6 +104,19 @@ public class PromptCraftSettingsScreen extends Screen {
         catch (Exception e) { return 0xFF17B95F; }
     }
 
+    private String shortenModelName(String value) {
+        if (value == null || value.isBlank()) {
+            return t("Select model", "Выбрать модель");
+        }
+
+        int maxLength = 28;
+        if (value.length() <= maxLength) {
+            return value;
+        }
+
+        return value.substring(0, maxLength - 3) + "...";
+    }
+
     @Override
     protected void init() {
         int centerX = this.width / 2;
@@ -111,17 +125,14 @@ public class PromptCraftSettingsScreen extends Screen {
         int contentX = centerX - 30;
         int contentY = menuY;
 
-        apiKeyField = new TextFieldWidget(this.textRenderer, contentX - 5, contentY + 15, 185, 16, Text.literal("API Key"));
-        apiKeyField.setMaxLength(100);
+        apiKeyField = new PasswordFieldWidget(this.textRenderer, contentX + 2, contentY + 18, 178, 12, Text.literal("API Key"));
+        apiKeyField.setMaxLength(200);
         apiKeyField.setText(apiKey);
         apiKeyField.setDrawsBackground(false);
         this.addDrawableChild(apiKeyField);
 
-        modelField = new TextFieldWidget(this.textRenderer, contentX - 5, contentY + 60, 160, 16, Text.literal("Model"));
-        modelField.setMaxLength(100);
-        modelField.setText(model);
-        modelField.setDrawsBackground(false);
-        this.addDrawableChild(modelField);
+        modelButton = new ModelSelectButton(contentX - 5, contentY + 57, 160, 22, Text.literal(shortenModelName(model)), button -> openModelList());
+        this.addDrawableChild(modelButton);
 
         refreshButton = new IconButton(contentX + 160, contentY + 58, 20, 20, REFRESH_ICON, button -> fetchModels());
         this.addDrawableChild(refreshButton);
@@ -153,7 +164,7 @@ public class PromptCraftSettingsScreen extends Screen {
         saveButton = new FlatButton(centerX - 60, centerY + 90, 120, 20, Text.literal(t("Save & Close", "Сохранить и закрыть")), button -> {
             PacketByteBuf buf = PacketByteBufs.create();
             buf.writeString(apiKeyField.getText());
-            buf.writeString(modelField.getText());
+            buf.writeString(model);
             buf.writeBoolean(showPreview);
             buf.writeString(language);
             buf.writeString(themeColor);
@@ -184,6 +195,21 @@ public class PromptCraftSettingsScreen extends Screen {
         modelScroll = 0; // Сбрасываем скролл при поиске
     }
 
+    private void openModelList() {
+        fetchError = null;
+
+        if (fetchedModels.isEmpty()) {
+            fetchModels();
+            return;
+        }
+
+        filteredModels = new ArrayList<>(fetchedModels);
+        modelSearchField.setText("");
+        modelSearchField.setFocused(true);
+        modelScroll = 0;
+        modelMenuOpen = true;
+    }
+
     private void fetchModels() {
         if (isFetchingModels) return;
         String key = apiKeyField.getText().trim();
@@ -209,6 +235,7 @@ public class PromptCraftSettingsScreen extends Screen {
                         fetchedModels = models;
                         filteredModels = new ArrayList<>(models);
                         modelSearchField.setText("");
+                        modelSearchField.setFocused(true);
                         modelScroll = 0;
                         modelMenuOpen = true;
                         isFetchingModels = false;
@@ -231,25 +258,78 @@ public class PromptCraftSettingsScreen extends Screen {
         boolean isLang = selectedTab == TAB_LANG;
         boolean isTheme = selectedTab == TAB_THEME;
         
-        apiKeyField.visible = isApi; apiKeyField.active = isApi;
-        modelField.visible = isApi; modelField.active = isApi;
-        refreshButton.visible = isApi; refreshButton.active = isApi;
-        previewButton.visible = isAnim; previewButton.active = isAnim;
-        langButton.visible = isLang; langButton.active = isLang;
-        hexColorField.visible = isTheme; hexColorField.active = isTheme;
+        apiKeyField.visible = isApi;
+        apiKeyField.active = isApi;
+
+        modelButton.visible = isApi;
+        modelButton.active = isApi;
+
+        refreshButton.visible = isApi;
+        refreshButton.active = isApi;
+
+        previewButton.visible = isAnim;
+        previewButton.active = isAnim;
+
+        langButton.visible = isLang;
+        langButton.active = isLang;
+
+        hexColorField.visible = isTheme;
+        hexColorField.active = isTheme;
     }
     
     // --- ПЕРЕХВАТ КЛАВИАТУРЫ ДЛЯ ПОЛЯ ПОИСКА ---
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (modelMenuOpen && modelSearchField.keyPressed(keyCode, scanCode, modifiers)) return true;
+        if (modelMenuOpen && modelSearchField.keyPressed(keyCode, scanCode, modifiers)) {
+            return true;
+        }
+
+        if (apiKeyField != null && apiKeyField.isFocused()) {
+            if (Screen.hasControlDown() && keyCode == GLFW.GLFW_KEY_A) {
+                apiKeyField.setSelectionStart(0);
+                apiKeyField.setSelectionEnd(apiKeyField.getText().length());
+                return true;
+            }
+
+            if (apiKeyField.keyPressed(keyCode, scanCode, modifiers)) {
+                return true;
+            }
+        }
+
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     @Override
     public boolean charTyped(char chr, int modifiers) {
-        if (modelMenuOpen && modelSearchField.charTyped(chr, modifiers)) return true;
+        if (modelMenuOpen && modelSearchField.charTyped(chr, modifiers)) {
+            return true;
+        }
+
+        if (apiKeyField != null && apiKeyField.isFocused()) {
+            return apiKeyField.charTyped(chr, modifiers);
+        }
+
         return super.charTyped(chr, modifiers);
+    }
+
+    private boolean isMouseOverWidget(net.minecraft.client.gui.widget.ClickableWidget widget, double mouseX, double mouseY) {
+        return widget != null && widget.visible && widget.isMouseOver(mouseX, mouseY);
+    }
+
+    private void clearInputFocus() {
+        if (apiKeyField != null) {
+            apiKeyField.setFocused(false);
+        }
+
+        if (hexColorField != null) {
+            hexColorField.setFocused(false);
+        }
+
+        if (modelSearchField != null) {
+            modelSearchField.setFocused(false);
+        }
+
+        this.setFocused(null);
     }
 
     @Override
@@ -257,6 +337,15 @@ public class PromptCraftSettingsScreen extends Screen {
         int centerX = this.width / 2; int centerY = this.height / 2;
         int menuX = centerX - 180; int menuY = centerY - 60;
         int contentX = centerX - 30; int contentY = menuY;
+
+        boolean clickedInput =
+                isMouseOverWidget(apiKeyField, mouseX, mouseY)
+                || isMouseOverWidget(hexColorField, mouseX, mouseY)
+                || isMouseOverWidget(modelSearchField, mouseX, mouseY);
+
+        if (!clickedInput && !modelMenuOpen && !langMenuOpen) {
+            clearInputFocus();
+        }
 
         if (modelMenuOpen) {
             int overlayW = 260; int overlayH = 160;
@@ -287,7 +376,8 @@ public class PromptCraftSettingsScreen extends Screen {
                 if (index >= filteredModels.size()) break;
                 int itemY = listY + i * itemH;
                 if (mouseX >= ox + 10 && mouseX <= ox + overlayW - 15 && mouseY >= itemY && mouseY <= itemY + itemH) {
-                    modelField.setText(filteredModels.get(index));
+                    model = filteredModels.get(index);
+                    modelButton.setMessage(Text.literal(shortenModelName(model)));
                     modelMenuOpen = false;
                     return true;
                 }
@@ -431,7 +521,6 @@ public class PromptCraftSettingsScreen extends Screen {
             context.drawTextWithShadow(this.textRenderer, "Model:", contentX - 5, contentY + 45, 0xFFFFFF);
 
             context.fill(contentX - 5, contentY + 12, contentX + 185, contentY + 34, 0xFF2D2D2D);
-            context.fill(contentX - 5, contentY + 57, contentX + 155, contentY + 79, 0xFF2D2D2D);
 
             if (isFetchingModels) {
                 context.drawTextWithShadow(this.textRenderer, t("Fetching...", "Загрузка..."), contentX - 5, contentY + 85, 0xAAAAAA);
@@ -652,6 +741,148 @@ public class PromptCraftSettingsScreen extends Screen {
             int textX = this.getX() + (this.width - PromptCraftSettingsScreen.this.textRenderer.getWidth(this.getMessage())) / 2;
             int textY = this.getY() + (this.height - 8) / 2;
             context.drawTextWithShadow(PromptCraftSettingsScreen.this.textRenderer, this.getMessage(), textX, textY, textColor);
+        }
+    }
+
+    private class ModelSelectButton extends FlatButton {
+        public ModelSelectButton(int x, int y, int width, int height, Text message, PressAction onPress) {
+            super(x, y, width, height, message, onPress);
+        }
+
+        @Override
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            if (!this.visible) {
+                return;
+            }
+
+            int bgColor = this.isHovered() ? 0xFF3D3D3D : 0xFF2D2D2D;
+            int textColor = this.isHovered() ? 0xFFFFFF : 0xD2D2D2;
+
+            context.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height, bgColor);
+
+            int textX = this.getX() + 7;
+            int textY = this.getY() + (this.height - 8) / 2;
+
+            context.drawTextWithShadow(PromptCraftSettingsScreen.this.textRenderer, this.getMessage(), textX, textY, textColor);
+
+            context.drawTextWithShadow(
+                    PromptCraftSettingsScreen.this.textRenderer,
+                    "▼",
+                    this.getX() + this.width - 14,
+                    textY,
+                    textColor
+            );
+        }
+    }
+
+    private class PasswordFieldWidget extends TextFieldWidget {
+        public PasswordFieldWidget(net.minecraft.client.font.TextRenderer textRenderer, int x, int y, int width, int height, Text text) {
+            super(textRenderer, x, y, width, height, text);
+        }
+
+        @Override
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            if (!this.visible) {
+                return;
+            }
+
+            int bgColor = this.isFocused() ? 0xFF3A3A3A : 0xFF2D2D2D;
+            context.fill(
+                    this.getX() - 7,
+                    this.getY() - 6,
+                    this.getX() + this.width + 7,
+                    this.getY() + this.height + 6,
+                    bgColor
+            );
+
+            String real = this.getText();
+            String shown = real.isEmpty() ? "" : "*".repeat(Math.min(real.length(), 32));
+
+            int textX = this.getX();
+            int textY = this.getY() + 2;
+            int textColor = this.active ? 0xE0E0E0 : 0x707070;
+
+            renderSelectionHighlight(context, shown, textX, textY);
+
+            context.drawTextWithShadow(
+                    PromptCraftSettingsScreen.this.textRenderer,
+                    shown,
+                    textX,
+                    textY,
+                    textColor
+            );
+
+            renderPasswordCursor(context, shown, textX, textY);
+        }
+
+        private void renderSelectionHighlight(DrawContext context, String shown, int textX, int textY) {
+            if (!this.isFocused() || shown.isEmpty()) {
+                return;
+            }
+
+            String selectedText = this.getSelectedText();
+            if (selectedText == null || selectedText.isEmpty()) {
+                return;
+            }
+
+            int selectionStart = getVisualSelectionStart();
+            int selectionEnd = getVisualSelectionEnd(shown);
+
+            if (selectionStart == selectionEnd) {
+                return;
+            }
+
+            int startX = textX + PromptCraftSettingsScreen.this.textRenderer.getWidth(shown.substring(0, selectionStart));
+            int endX = textX + PromptCraftSettingsScreen.this.textRenderer.getWidth(shown.substring(0, selectionEnd));
+
+            int left = Math.min(startX, endX);
+            int right = Math.max(startX, endX);
+
+            context.fill(left, textY - 1, right, textY + 10, 0xFF2F6FED);
+        }
+
+        private int getVisualSelectionStart() {
+            int realLength = this.getText().length();
+
+            if (realLength <= 0) {
+                return 0;
+            }
+
+            int selectedLength = this.getSelectedText().length();
+
+            if (selectedLength >= realLength) {
+                return 0;
+            }
+
+            return 0;
+        }
+
+        private int getVisualSelectionEnd(String shown) {
+            int realLength = this.getText().length();
+            int selectedLength = this.getSelectedText().length();
+
+            if (selectedLength >= realLength) {
+                return shown.length();
+            }
+
+            return Math.min(selectedLength, shown.length());
+        }
+
+        private void renderPasswordCursor(DrawContext context, String shown, int textX, int textY) {
+            if (!this.isFocused()) {
+                return;
+            }
+
+            if (!this.getSelectedText().isEmpty()) {
+                return;
+            }
+
+            if ((System.currentTimeMillis() / 500) % 2 != 0) {
+                return;
+            }
+
+            int cursorX = textX + PromptCraftSettingsScreen.this.textRenderer.getWidth(shown);
+            context.fill(cursorX + 1, textY, cursorX + 2, textY + 11, 0xFFFFFFFF);
         }
     }
 
