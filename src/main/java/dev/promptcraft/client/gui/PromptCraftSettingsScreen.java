@@ -38,7 +38,8 @@ public class PromptCraftSettingsScreen extends Screen {
 
     private boolean langMenuOpen = false;
     
-    private float pickerHue = 0.33f;    private float pickerSat = 0.85f;
+    private float pickerHue = 0.33f;    
+    private float pickerSat = 0.85f;
     private float pickerVal = 0.72f;
     private boolean draggingHue = false;
     private boolean draggingSV = false;
@@ -60,6 +61,7 @@ public class PromptCraftSettingsScreen extends Screen {
         this.themeColor = themeColor != null && !themeColor.isEmpty() ? themeColor : "#17b95f";
         hexToHsv(this.themeColor);
     }
+    
     private String t(String en, String ru) {
         return "ru".equals(language) ? ru : en;
     }
@@ -103,10 +105,11 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(previewButton);
         
-        langButton = new FlatButton(contentX - 5, contentY + 5, 190, 20, Text.literal(t("Change language", "Изменить язык")), button -> {
+        langButton = new FlatButton(contentX - 5, contentY + 30, 190, 20, Text.literal(t("Change language", "Изменить язык")), button -> {
             langMenuOpen = !langMenuOpen;
         });
-        this.addDrawableChild(langButton);
+        this.addDrawableChild(langButton);        
+        
         hexColorField = new TextFieldWidget(this.textRenderer, contentX + 100, contentY + 110, 80, 16, Text.literal("Hex"));
         hexColorField.setMaxLength(7);
         hexColorField.setText(themeColor);
@@ -127,6 +130,7 @@ public class PromptCraftSettingsScreen extends Screen {
         
         updateWidgetVisibility();
     }    
+    
     private void updateWidgetVisibility() {
         boolean isApi = selectedTab == TAB_API;
         boolean isAnim = selectedTab == TAB_ANIM;
@@ -192,6 +196,7 @@ public class PromptCraftSettingsScreen extends Screen {
             }
             return true;
         }        
+        
         // Tab clicks
         if (mouseX >= menuX && mouseX <= menuX + 120) {
             for (int i = 0; i < 4; i++) {
@@ -243,7 +248,8 @@ public class PromptCraftSettingsScreen extends Screen {
             int svX = contentX;
             int svY = contentY + 5;
             int hueY = svY;
-            if (draggingSV) {                updateSV(mouseX, mouseY, svX, svY);
+            if (draggingSV) {                
+                updateSV(mouseX, mouseY, svX, svY);
                 return true;
             }
             if (draggingHue) {
@@ -311,15 +317,18 @@ public class PromptCraftSettingsScreen extends Screen {
             context.fill(contentX + 20, contentY + 95, contentX + 105, contentY + 117, 0xFF2D2D2D);
         }
 
-        // Language popup (render on top)
+        super.render(context, mouseX, mouseY, delta);
+
+        // Language overlay (render on top of everything)
         if (langMenuOpen) {
             renderLangMenu(context);
         }
-
-        super.render(context, mouseX, mouseY, delta);
-    }
+    }    
     
     private void renderLangMenu(DrawContext context) {
+        context.getMatrices().push();
+        context.getMatrices().translate(0.0f, 0.0f, 400.0f);
+
         int cx = this.width / 2;
         int cy = this.height / 2;
         int overlayW = 200;
@@ -327,8 +336,7 @@ public class PromptCraftSettingsScreen extends Screen {
         int ox = cx - overlayW / 2;
         int oy = cy - overlayH / 2;
         
-        // Semi-transparent darkening behind overlay
-        context.fill(0, 0, this.width, this.height, 0xCC000000);
+        context.fill(0, 0, this.width, this.height, 0x80000000);
         
         // Overlay background with 3D pixel border
         context.fill(ox, oy, ox + overlayW, oy + overlayH, 0xFF1E1E1E);
@@ -349,19 +357,26 @@ public class PromptCraftSettingsScreen extends Screen {
         context.fill(closeX, closeY + 13, closeX + 18, closeY + 14, 0xFF222222);
         context.drawText(this.textRenderer, "X", closeX + 6, closeY + 3, 0xFFAAAAAA, false);
         
+        // ПОЛУЧАЕМ ЦВЕТ ТЕМЫ ИЗ НАСТРОЕК
+        int themeColorInt = parseThemeColor(themeColor);
+        
         // Language options
         for (int i = 0; i < LANG_OPTIONS.length; i++) {
             int itemY = oy + 30 + i * 22;
             boolean sel = LANG_CODES[i].equals(language);
             if (sel) {
-                context.fill(ox + 10, itemY, ox + overlayW - 10, itemY + 20, 0xFFF8F675);
+                // ИСПОЛЬЗУЕМ ВЫБРАННЫЙ ЦВЕТ ТЕМЫ ДЛЯ ВЫДЕЛЕНИЯ
+                context.fill(ox + 10, itemY, ox + overlayW - 10, itemY + 20, themeColorInt);
                 context.drawText(this.textRenderer, LANG_OPTIONS[i], ox + 16, itemY + 6, 0x000000, false);
             } else {
                 context.fill(ox + 10, itemY, ox + overlayW - 10, itemY + 20, 0xFF2D2D2D);
                 context.drawTextWithShadow(this.textRenderer, LANG_OPTIONS[i], ox + 16, itemY + 6, 0xD2D2D2);
             }
         }
+
+        context.getMatrices().pop();
     }    
+    
     private void renderColorPicker(DrawContext context, int x, int y) {
         int svX = x;
         int svY = y;
