@@ -110,12 +110,24 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(langButton);        
         
-        hexColorField = new TextFieldWidget(this.textRenderer, contentX + 100, contentY + 110, 80, 16, Text.literal("Hex"));
+        int hexFieldWidth = 70;
+        int hexFieldX = contentX + (SV_SIZE - hexFieldWidth) / 2;
+
+        hexColorField = new TextFieldWidget(this.textRenderer, hexFieldX, contentY + 94, hexFieldWidth, 16, Text.literal("Hex"));
         hexColorField.setMaxLength(7);
         hexColorField.setText(themeColor);
         hexColorField.setDrawsBackground(false);
+        hexColorField.setChangedListener(text -> {
+            if (text.startsWith("#") && text.length() == 7) {
+                try {
+                    Integer.parseInt(text.substring(1), 16);
+                    themeColor = text;
+                    hexToHsv(themeColor);
+                } catch (NumberFormatException ignored) {}
+            }
+        });
         this.addDrawableChild(hexColorField);
-
+        
         saveButton = new FlatButton(centerX - 60, centerY + 90, 120, 20, Text.literal(t("Save & Close", "Сохранить и закрыть")), button -> {
             PacketByteBuf buf = PacketByteBufs.create();
             buf.writeString(apiKeyField.getText());
@@ -161,14 +173,12 @@ public class PromptCraftSettingsScreen extends Screen {
         int contentX = centerX - 30;
         int contentY = menuY;
         
-        // Language overlay (top layer)
         if (langMenuOpen) {
             int overlayW = 200;
             int overlayH = 90;
             int ox = centerX - overlayW / 2;
             int oy = centerY - overlayH / 2;
             
-            // Close button (X)
             int closeBtnX = ox + overlayW - 22;
             int closeBtnY = oy + 4;
             if (mouseX >= closeBtnX && mouseX <= closeBtnX + 18 && mouseY >= closeBtnY && mouseY <= closeBtnY + 14) {
@@ -176,7 +186,6 @@ public class PromptCraftSettingsScreen extends Screen {
                 return true;
             }
             
-            // Language options
             for (int i = 0; i < LANG_OPTIONS.length; i++) {
                 int itemY = oy + 32 + i * 22;
                 if (mouseX >= ox + 10 && mouseX <= ox + overlayW - 10 && mouseY >= itemY && mouseY <= itemY + 20) {
@@ -189,7 +198,6 @@ public class PromptCraftSettingsScreen extends Screen {
                 }
             }
             
-            // Click outside overlay = close
             if (mouseX < ox || mouseX > ox + overlayW || mouseY < oy || mouseY > oy + overlayH) {
                 langMenuOpen = false;
                 return true;
@@ -197,7 +205,6 @@ public class PromptCraftSettingsScreen extends Screen {
             return true;
         }        
         
-        // Tab clicks
         if (mouseX >= menuX && mouseX <= menuX + 120) {
             for (int i = 0; i < 4; i++) {
                 int ty = menuY + i * 25;
@@ -209,7 +216,6 @@ public class PromptCraftSettingsScreen extends Screen {
             }
         }
         
-        // HSV picker clicks
         if (selectedTab == TAB_THEME) {
             int svX = contentX;
             int svY = contentY + 5;
@@ -286,22 +292,18 @@ public class PromptCraftSettingsScreen extends Screen {
         int contentX = centerX - 30;
         int contentY = menuY;
         
-        // Background
         context.fill(centerX - 200, centerY - 100, centerX + 200, centerY + 120, 0xFF1E1E1E);
         
-        // Title (only once)
         context.drawTextWithShadow(this.textRenderer, t("Settings", "Настройки"), menuX, centerY - 85, 0xFFFFFF);
         context.drawTextWithShadow(this.textRenderer, "esc", centerX + 170, centerY - 85, 0x6E6E6E);
         
         int themeColorInt = parseThemeColor(themeColor);
         
-        // Menu Items
         renderMenuItem(context, tabName(0), menuX, menuY, selectedTab == TAB_API, themeColorInt);
         renderMenuItem(context, tabName(1), menuX, menuY + 25, selectedTab == TAB_ANIM, themeColorInt);
         renderMenuItem(context, tabName(2), menuX, menuY + 50, selectedTab == TAB_LANG, themeColorInt);
         renderMenuItem(context, tabName(3), menuX, menuY + 75, selectedTab == TAB_THEME, themeColorInt);
         
-        // Content panels
         if (selectedTab == TAB_API) {
             context.drawTextWithShadow(this.textRenderer, "NVIDIA API Key:", contentX - 5, contentY, 0xFFFFFF);
             context.drawTextWithShadow(this.textRenderer, "Model:", contentX - 5, contentY + 45, 0xFFFFFF);
@@ -313,13 +315,11 @@ public class PromptCraftSettingsScreen extends Screen {
             context.drawTextWithShadow(this.textRenderer, "ru".equals(language) ? "Русский" : "English", contentX - 5, contentY + 12, themeColorInt);
         } else if (selectedTab == TAB_THEME) {
             renderColorPicker(context, contentX, contentY + 5);
-            context.drawTextWithShadow(this.textRenderer, t("Hex:", "Hex:"), contentX - 5, contentY + 95, 0xFFFFFF);
-            context.fill(contentX + 20, contentY + 95, contentX + 105, contentY + 117, 0xFF2D2D2D);
-        }
-
+            context.fill(contentX, contentY + 92, contentX + SV_SIZE, contentY + 112, 0xFF2D2D2D);
+        }        
+        
         super.render(context, mouseX, mouseY, delta);
 
-        // Language overlay (render on top of everything)
         if (langMenuOpen) {
             renderLangMenu(context);
         }
@@ -338,18 +338,15 @@ public class PromptCraftSettingsScreen extends Screen {
         
         context.fill(0, 0, this.width, this.height, 0x80000000);
         
-        // Overlay background with 3D pixel border
         context.fill(ox, oy, ox + overlayW, oy + overlayH, 0xFF1E1E1E);
         context.fill(ox, oy, ox + overlayW, oy + 1, 0xFF555555);
         context.fill(ox, oy + overlayH - 1, ox + overlayW, oy + overlayH, 0xFF111111);
         context.fill(ox, oy, ox + 1, oy + overlayH, 0xFF555555);
         context.fill(ox + overlayW - 1, oy, ox + overlayW, oy + overlayH, 0xFF111111);
         
-        // Title
         String title = t("Select Language", "Выберите язык");
         context.drawTextWithShadow(this.textRenderer, title, ox + 10, oy + 6, 0xFFFFFF);
         
-        // Close X button
         int closeX = ox + overlayW - 22;
         int closeY = oy + 5;
         context.fill(closeX, closeY, closeX + 18, closeY + 14, 0xFF2D2D2D);
@@ -357,15 +354,12 @@ public class PromptCraftSettingsScreen extends Screen {
         context.fill(closeX, closeY + 13, closeX + 18, closeY + 14, 0xFF222222);
         context.drawText(this.textRenderer, "X", closeX + 6, closeY + 3, 0xFFAAAAAA, false);
         
-        // ПОЛУЧАЕМ ЦВЕТ ТЕМЫ ИЗ НАСТРОЕК
         int themeColorInt = parseThemeColor(themeColor);
         
-        // Language options
         for (int i = 0; i < LANG_OPTIONS.length; i++) {
             int itemY = oy + 30 + i * 22;
             boolean sel = LANG_CODES[i].equals(language);
             if (sel) {
-                // ИСПОЛЬЗУЕМ ВЫБРАННЫЙ ЦВЕТ ТЕМЫ ДЛЯ ВЫДЕЛЕНИЯ
                 context.fill(ox + 10, itemY, ox + overlayW - 10, itemY + 20, themeColorInt);
                 context.drawText(this.textRenderer, LANG_OPTIONS[i], ox + 16, itemY + 6, 0x000000, false);
             } else {
@@ -383,7 +377,6 @@ public class PromptCraftSettingsScreen extends Screen {
         int hueX = svX + SV_SIZE + 8;
         int hueY = svY;
         
-        // Saturation-Value grid (pixel-art look with cells)
         for (int row = 0; row < SV_CELLS; row++) {
             for (int col = 0; col < SV_CELLS; col++) {
                 float s = col / (float) SV_CELLS;
@@ -394,31 +387,26 @@ public class PromptCraftSettingsScreen extends Screen {
                              0xFF000000 | color);
             }
         }
-        // SV border (pixel-art 3D block look)
         context.fill(svX - 1, svY - 1, svX + SV_SIZE + 1, svY, 0xFF555555);
         context.fill(svX - 1, svY + SV_SIZE, svX + SV_SIZE + 1, svY + SV_SIZE + 1, 0xFF111111);
         context.fill(svX - 1, svY, svX, svY + SV_SIZE, 0xFF555555);
         context.fill(svX + SV_SIZE, svY, svX + SV_SIZE + 1, svY + SV_SIZE + 1, 0xFF111111);
         
-        // Hue bar (pixel-art segmented)
         int segH = HUE_H / HUE_SEGMENTS;
         for (int i = 0; i < HUE_SEGMENTS; i++) {
             float h = i / (float) HUE_SEGMENTS;
             int c = hsvToRgb(h, 1f, 1f);
             context.fill(hueX, hueY + i * segH, hueX + HUE_W, hueY + i * segH + segH, 0xFF000000 | c);
         }
-        // Hue border
         context.fill(hueX - 1, hueY - 1, hueX + HUE_W + 1, hueY, 0xFF555555);
         context.fill(hueX - 1, hueY + HUE_H, hueX + HUE_W + 1, hueY + HUE_H + 1, 0xFF111111);
         context.fill(hueX - 1, hueY, hueX, hueY + HUE_H, 0xFF555555);
         context.fill(hueX + HUE_W, hueY, hueX + HUE_W + 1, hueY + HUE_H + 1, 0xFF111111);
         
-        // Hue selector indicator (white pixel crosshair on hue bar)
         int hueIndicatorY = hueY + (int) (pickerHue * HUE_H);
         context.fill(hueX - 3, hueIndicatorY - 1, hueX + HUE_W + 3, hueIndicatorY + 2, 0xFFFFFFFF);
         context.fill(hueX - 2, hueIndicatorY, hueX + HUE_W + 2, hueIndicatorY + 1, 0xFF000000);
         
-        // SV selector indicator (white border crosshair)
         int svIndX = svX + (int) (pickerSat * SV_SIZE);
         int svIndY = svY + (int) ((1f - pickerVal) * SV_SIZE);
         context.fill(svIndX - 2, svIndY - 2, svIndX + 3, svIndY - 1, 0xFFFFFFFF);
@@ -427,7 +415,6 @@ public class PromptCraftSettingsScreen extends Screen {
         context.fill(svIndX + 2, svIndY - 1, svIndX + 3, svIndY + 2, 0xFFFFFFFF);
         context.fill(svIndX - 1, svIndY - 1, svIndX + 2, svIndY + 2, 0xFF000000);
         
-        // Preview square
         int previewX = hueX + HUE_W + 12;
         int previewY = hueY;
         context.fill(previewX, previewY, previewX + PREVIEW_SIZE, previewY + PREVIEW_SIZE, parseThemeColor(themeColor));
