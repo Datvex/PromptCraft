@@ -110,10 +110,8 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(langButton);        
         
-        int hexFieldWidth = 70;
-        int hexFieldX = contentX + (SV_SIZE - hexFieldWidth) / 2;
-
-        hexColorField = new TextFieldWidget(this.textRenderer, hexFieldX, contentY + 94, hexFieldWidth, 16, Text.literal("Hex"));
+        // Делаем поле с запасом ширины (60), чтобы текст не уезжал за края при вводе
+        hexColorField = new TextFieldWidget(this.textRenderer, contentX + 10, contentY + 95, 60, 16, Text.literal("Hex"));
         hexColorField.setMaxLength(7);
         hexColorField.setText(themeColor);
         hexColorField.setDrawsBackground(false);
@@ -316,6 +314,10 @@ public class PromptCraftSettingsScreen extends Screen {
         } else if (selectedTab == TAB_THEME) {
             renderColorPicker(context, contentX, contentY + 5);
             context.fill(contentX, contentY + 92, contentX + SV_SIZE, contentY + 112, 0xFF2D2D2D);
+            
+            // Динамически высчитываем пиксели и ставим поле ровно в центр
+            int textW = this.textRenderer.getWidth(hexColorField.getText());
+            hexColorField.setX(contentX + (80 - textW) / 2);
         }        
         
         super.render(context, mouseX, mouseY, delta);

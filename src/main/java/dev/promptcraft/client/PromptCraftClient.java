@@ -42,15 +42,25 @@ public class PromptCraftClient implements ClientModInitializer {
             if (client.player == null) return;
             
             boolean showPreview = PromptCraftConfigManager.get().showSelectionPreview;
+            if (!showPreview) return; // Если предпросмотр вообще выключен в настройках
+
             BlockPos pos1 = firstPos;
             BlockPos pos2 = secondPos;
 
-            if (showPreview && pos1 != null && pos2 == null) {
+            // Если выделена только первая точка
+            if (pos1 != null && pos2 == null) {
+                // Проверяем, держит ли игрок нашу кисть в главной или левой руке
+                boolean holdingBrush = client.player.getMainHandStack().isOf(dev.promptcraft.PromptCraftItems.SELECTION_BRUSH) || 
+                                       client.player.getOffHandStack().isOf(dev.promptcraft.PromptCraftItems.SELECTION_BRUSH);
+                
+                // Если кисти в руках нет — прерываем отрисовку
+                if (!holdingBrush) return;
+
                 HitResult hit = client.crosshairTarget;
                 if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
                     pos2 = ((BlockHitResult) hit).getBlockPos();
                 } else {
-                    // Safe fallback: project exactly 5 blocks forward if looking at air
+                    // Безопасный фоллбэк: проецируем на 5 блоков вперёд, если смотрим в воздух
                     Vec3d eyePos = client.player.getCameraPosVec(context.tickDelta());
                     Vec3d lookVec = client.player.getRotationVec(context.tickDelta());
                     pos2 = BlockPos.ofFloored(eyePos.add(lookVec.multiply(5.0D)));
