@@ -25,6 +25,7 @@ public class PromptCraftNetworking {
             String themeColor = buf.readString();
             boolean thickOutline = buf.readBoolean();
             float fillOpacity = buf.readFloat();
+            boolean outlineThroughBlocks = buf.readBoolean();
 
             server.execute(() -> {
                 PromptCraftEnv.saveNvidiaApiKey(apiKey);
@@ -35,6 +36,7 @@ public class PromptCraftNetworking {
                 config.themeColor = themeColor;
                 config.thickSelectionOutline = thickOutline;
                 config.selectionFillOpacity = Math.max(0.0f, Math.min(1.0f, fillOpacity));
+                config.selectionOutlineThroughBlocks = outlineThroughBlocks;
                 PromptCraftConfigManager.save();
             });
         });
@@ -59,6 +61,7 @@ public class PromptCraftNetworking {
         buf.writeString(config.themeColor);
         buf.writeBoolean(config.thickSelectionOutline);
         buf.writeFloat(config.selectionFillOpacity);
+        buf.writeBoolean(config.selectionOutlineThroughBlocks);
 
         ServerPlayNetworking.send(player, OPEN_GUI_PACKET, buf);
     }

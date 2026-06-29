@@ -14,6 +14,7 @@ public class PromptCraftConfig {
 
     public boolean thickSelectionOutline = true;
     public float selectionFillOpacity = 0.075f;
+    public boolean selectionOutlineThroughBlocks = false;
 
     public boolean selectionLimitEnabled = true;
     public int maxSelectionWidth = 64;

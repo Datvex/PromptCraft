@@ -2,6 +2,7 @@ package dev.promptcraft.client;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.promptcraft.client.gui.PromptCraftSettingsScreen;
+import dev.promptcraft.config.PromptCraftConfig;
 import dev.promptcraft.config.PromptCraftConfigManager;
 import dev.promptcraft.network.PromptCraftNetworking;
 import net.fabricmc.api.ClientModInitializer;
@@ -38,8 +39,18 @@ public class PromptCraftClient implements ClientModInitializer {
             String themeColor = buf.readString();
             boolean thickOutline = buf.readBoolean();
             float fillOpacity = buf.readFloat();
+            boolean outlineThroughBlocks = buf.readBoolean();
             client.execute(() -> client.setScreen(
-                    new PromptCraftSettingsScreen(apiKey, model, showPreview, language, themeColor, thickOutline, fillOpacity)
+                    new PromptCraftSettingsScreen(
+                            apiKey,
+                            model,
+                            showPreview,
+                            language,
+                            themeColor,
+                            thickOutline,
+                            fillOpacity,
+                            outlineThroughBlocks
+                    )
             ));
         });        WorldRenderEvents.LAST.register(context -> {
             MinecraftClient client = MinecraftClient.getInstance();
@@ -92,12 +103,12 @@ public class PromptCraftClient implements ClientModInitializer {
             int maxY = Math.max(pos1.getY(), pos2.getY()) + 1;
             int maxZ = Math.max(pos1.getZ(), pos2.getZ()) + 1;
 
-            double fillEpsilon = 0.012D;
+            double fillEpsilon = 0.025D;
             double outlineEpsilon = 0.018D;
 
             Box fillBox = new Box(
                     minX - fillEpsilon,
-                    minY - fillEpsilon,
+                    minY + 0.006D,
                     minZ - fillEpsilon,
                     maxX + fillEpsilon,
                     maxY + fillEpsilon,
@@ -106,7 +117,7 @@ public class PromptCraftClient implements ClientModInitializer {
 
             Box outlineBox = new Box(
                     minX - outlineEpsilon,
-                    minY - outlineEpsilon,
+                    minY + 0.012D,
                     minZ - outlineEpsilon,
                     maxX + outlineEpsilon,
                     maxY + outlineEpsilon,
@@ -120,12 +131,9 @@ public class PromptCraftClient implements ClientModInitializer {
             RenderSystem.depthMask(false);
             RenderSystem.setShader(GameRenderer::getPositionColorProgram);
 
-            // Заливка области.
-            // Box слегка расширен наружу, чтобы плоскости не совпадали с гранями блоков.
-            float fillOpacity = Math.max(0.0f, Math.min(1.0f, PromptCraftConfigManager.get().selectionFillOpacity));
+            PromptCraftConfig config = PromptCraftConfigManager.get();
 
-            RenderSystem.enablePolygonOffset();
-            RenderSystem.polygonOffset(-1.0f, -10.0f);
+            float fillOpacity = Math.max(0.0f, Math.min(1.0f, config.selectionFillOpacity));
 
             if (fillOpacity > 0.0f) {
                 buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
@@ -133,14 +141,22 @@ public class PromptCraftClient implements ClientModInitializer {
                 tessellator.draw();
             }
 
-            RenderSystem.polygonOffset(0.0f, 0.0f);
-            RenderSystem.disablePolygonOffset();
+            boolean outlineThroughBlocks = config.selectionOutlineThroughBlocks;
 
-            // Контур поверх заливки.
-            float outlineThickness = PromptCraftConfigManager.get().thickSelectionOutline ? 0.035f : 0.008f;
+            if (outlineThroughBlocks) {
+                RenderSystem.disableDepthTest();
+            } else {
+                RenderSystem.enableDepthTest();
+            }
+
             buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+
+            float outlineThickness = config.thickSelectionOutline ? 0.035f : 0.008f;
             drawThickOutline(matrix, buffer, outlineBox, outlineThickness, r, g, b, 1.0f);
+
             tessellator.draw();
+
+            RenderSystem.enableDepthTest();
 
             RenderSystem.depthMask(true);
             RenderSystem.enableCull();

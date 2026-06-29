@@ -34,6 +34,7 @@ public class PromptCraftSettingsScreen extends Screen {
     private FlatButton saveButton;
     private FlatButton langButton;
     private FlatButton outlineButton;
+    private FlatButton outlineThroughBlocksButton;
     private OpacitySlider opacitySlider;
     private TextFieldWidget hexColorField;
     private IconButton refreshButton;
@@ -45,6 +46,7 @@ public class PromptCraftSettingsScreen extends Screen {
     private String themeColor;
     private boolean thickOutline;
     private float fillOpacity;
+    private boolean outlineThroughBlocks;
     
     private int selectedTab = 0;
     private static final int TAB_API = 0;
@@ -93,7 +95,8 @@ public class PromptCraftSettingsScreen extends Screen {
             String language,
             String themeColor,
             boolean thickOutline,
-            float fillOpacity
+            float fillOpacity,
+            boolean outlineThroughBlocks
     ) {
         super(Text.literal("PromptCraft Settings"));
         this.apiKey = apiKey;
@@ -103,6 +106,7 @@ public class PromptCraftSettingsScreen extends Screen {
         this.themeColor = themeColor != null && !themeColor.isEmpty() ? themeColor : "#17b95f";
         this.thickOutline = thickOutline;
         this.fillOpacity = Math.max(0.0f, Math.min(1.0f, fillOpacity));
+        this.outlineThroughBlocks = outlineThroughBlocks;
         hexToHsv(this.themeColor);
     }
     
@@ -135,6 +139,11 @@ public class PromptCraftSettingsScreen extends Screen {
 
     private String getOutlineButtonText() {
         return t("Outline: ", "Обводка: ") + (thickOutline ? t("Thick", "Жирная") : t("Vanilla", "Обычная"));
+    }
+
+    private String getOutlineThroughBlocksButtonText() {
+        return t("Contour through blocks: ", "Контур сквозь блоки: ")
+                + (outlineThroughBlocks ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"));
     }
 
     @Override
@@ -179,9 +188,22 @@ public class PromptCraftSettingsScreen extends Screen {
         );
         this.addDrawableChild(outlineButton);
 
+        outlineThroughBlocksButton = new FlatButton(
+                contentX - 5,
+                contentY + 45,
+                190,
+                20,
+                Text.literal(getOutlineThroughBlocksButtonText()),
+                button -> {
+                    outlineThroughBlocks = !outlineThroughBlocks;
+                    button.setMessage(Text.literal(getOutlineThroughBlocksButtonText()));
+                }
+        );
+        this.addDrawableChild(outlineThroughBlocksButton);
+
         opacitySlider = new OpacitySlider(
                 contentX - 5,
-                contentY + 40,
+                contentY + 85,
                 190,
                 20,
                 fillOpacity
@@ -212,6 +234,7 @@ public class PromptCraftSettingsScreen extends Screen {
             buf.writeString(themeColor);
             buf.writeBoolean(thickOutline);
             buf.writeFloat(fillOpacity);
+            buf.writeBoolean(outlineThroughBlocks);
             ClientPlayNetworking.send(PromptCraftNetworking.SAVE_GUI_PACKET, buf);
             this.client.setScreen(null);
         });
@@ -323,6 +346,9 @@ public class PromptCraftSettingsScreen extends Screen {
 
         outlineButton.visible = isVisual;
         outlineButton.active = isVisual;
+
+        outlineThroughBlocksButton.visible = isVisual;
+        outlineThroughBlocksButton.active = isVisual;
 
         opacitySlider.visible = isVisual;
         opacitySlider.active = isVisual;
@@ -456,6 +482,7 @@ public class PromptCraftSettingsScreen extends Screen {
                     langButton.setMessage(Text.literal(t("Change language", "Изменить язык")));
                     previewButton.setMessage(Text.literal(t("Dynamic Preview: ", "Динамический предпросмотр: ") + (showPreview ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"))));
                     outlineButton.setMessage(Text.literal(getOutlineButtonText()));
+                    outlineThroughBlocksButton.setMessage(Text.literal(getOutlineThroughBlocksButtonText()));
                     opacitySlider.updateMessage();
                     saveButton.setMessage(Text.literal(t("Save & Close", "Сохранить и закрыть")));
                     return true;
@@ -591,7 +618,8 @@ public class PromptCraftSettingsScreen extends Screen {
             hexColorField.setX(contentX + (80 - textW) / 2);
         } else if (selectedTab == TAB_VISUAL) {
             context.drawTextWithShadow(this.textRenderer, t("Outline:", "Обводка:"), contentX - 5, contentY - 10, 0xFFFFFF);
-            context.drawTextWithShadow(this.textRenderer, t("Fill opacity:", "Прозрачность заливки:"), contentX - 5, contentY + 30, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, t("Through blocks:", "Сквозь блоки:"), contentX - 5, contentY + 30, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, t("Fill opacity:", "Прозрачность заливки:"), contentX - 5, contentY + 70, 0xFFFFFF);
         }
         
         super.render(context, mouseX, mouseY, delta);
