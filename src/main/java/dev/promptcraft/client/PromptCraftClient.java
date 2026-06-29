@@ -88,25 +88,55 @@ public class PromptCraftClient implements ClientModInitializer {
             int maxY = Math.max(pos1.getY(), pos2.getY()) + 1;
             int maxZ = Math.max(pos1.getZ(), pos2.getZ()) + 1;
 
-            Box box = new Box(minX, minY, minZ, maxX, maxY, maxZ).offset(-cameraPos.x, -cameraPos.y, -cameraPos.z);
+            double fillEpsilon = 0.012D;
+            double outlineEpsilon = 0.018D;
+
+            Box fillBox = new Box(
+                    minX - fillEpsilon,
+                    minY - fillEpsilon,
+                    minZ - fillEpsilon,
+                    maxX + fillEpsilon,
+                    maxY + fillEpsilon,
+                    maxZ + fillEpsilon
+            ).offset(-cameraPos.x, -cameraPos.y, -cameraPos.z);
+
+            Box outlineBox = new Box(
+                    minX - outlineEpsilon,
+                    minY - outlineEpsilon,
+                    minZ - outlineEpsilon,
+                    maxX + outlineEpsilon,
+                    maxY + outlineEpsilon,
+                    maxZ + outlineEpsilon
+            ).offset(-cameraPos.x, -cameraPos.y, -cameraPos.z);
 
             RenderSystem.enableBlend();
             RenderSystem.defaultBlendFunc();
             RenderSystem.disableCull();
+            RenderSystem.enableDepthTest();
             RenderSystem.depthMask(false);
             RenderSystem.setShader(GameRenderer::getPositionColorProgram);
 
-            buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
-            drawFilledBox(matrix, buffer, box, r, g, b, 0.2f);
-            tessellator.draw();
+            // Заливка области.
+            // Box слегка расширен наружу, чтобы плоскости не совпадали с гранями блоков.
+            RenderSystem.enablePolygonOffset();
+            RenderSystem.polygonOffset(-1.0f, -10.0f);
 
             buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
-            drawThickOutline(matrix, buffer, box, 0.05f, r, g, b, 1.0f);
+            drawFilledBox(matrix, buffer, fillBox, r, g, b, 0.075f);
+            tessellator.draw();
+
+            RenderSystem.polygonOffset(0.0f, 0.0f);
+            RenderSystem.disablePolygonOffset();
+
+            // Контур поверх заливки.
+            buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+            drawThickOutline(matrix, buffer, outlineBox, 0.035f, r, g, b, 1.0f);
             tessellator.draw();
 
             RenderSystem.depthMask(true);
             RenderSystem.enableCull();
             RenderSystem.disableBlend();
+            RenderSystem.enableDepthTest();
         });
     }
 
