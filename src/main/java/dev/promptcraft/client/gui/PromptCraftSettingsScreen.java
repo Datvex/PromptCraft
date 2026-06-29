@@ -37,10 +37,8 @@ public class PromptCraftSettingsScreen extends Screen {
     private static final String[] LANG_CODES = {"en", "ru"};
 
     private boolean langMenuOpen = false;
-    private int langMenuX, langMenuY, langMenuW = 120, langMenuH;
     
-    private float pickerHue = 0.33f;
-    private float pickerSat = 0.85f;
+    private float pickerHue = 0.33f;    private float pickerSat = 0.85f;
     private float pickerVal = 0.72f;
     private boolean draggingHue = false;
     private boolean draggingSV = false;
@@ -105,14 +103,10 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(previewButton);
         
-        langButton = new FlatButton(contentX - 5, contentY + 5, 190, 20, Text.literal(t("Language: ", "Язык: ") + ("ru".equals(language) ? "Русский" : "English")), button -> {
+        langButton = new FlatButton(contentX - 5, contentY + 5, 190, 20, Text.literal(t("Change language", "Изменить язык")), button -> {
             langMenuOpen = !langMenuOpen;
         });
         this.addDrawableChild(langButton);
-        langMenuX = contentX - 5;
-        langMenuY = contentY + 5 + 20;
-        langMenuH = LANG_OPTIONS.length * 20 + 4;
-
         hexColorField = new TextFieldWidget(this.textRenderer, contentX + 100, contentY + 110, 80, 16, Text.literal("Hex"));
         hexColorField.setMaxLength(7);
         hexColorField.setText(themeColor);
@@ -163,24 +157,41 @@ public class PromptCraftSettingsScreen extends Screen {
         int contentX = centerX - 30;
         int contentY = menuY;
         
-        // Language menu click (top layer)
+        // Language overlay (top layer)
         if (langMenuOpen) {
-            if (mouseX >= langMenuX && mouseX <= langMenuX + langMenuW && mouseY >= langMenuY && mouseY <= langMenuY + langMenuH) {
-                int idx = (int) ((mouseY - langMenuY - 2) / 20);
-                if (idx >= 0 && idx < LANG_OPTIONS.length) {
-                    language = LANG_CODES[idx];
+            int overlayW = 200;
+            int overlayH = 90;
+            int ox = centerX - overlayW / 2;
+            int oy = centerY - overlayH / 2;
+            
+            // Close button (X)
+            int closeBtnX = ox + overlayW - 22;
+            int closeBtnY = oy + 4;
+            if (mouseX >= closeBtnX && mouseX <= closeBtnX + 18 && mouseY >= closeBtnY && mouseY <= closeBtnY + 14) {
+                langMenuOpen = false;
+                return true;
+            }
+            
+            // Language options
+            for (int i = 0; i < LANG_OPTIONS.length; i++) {
+                int itemY = oy + 32 + i * 22;
+                if (mouseX >= ox + 10 && mouseX <= ox + overlayW - 10 && mouseY >= itemY && mouseY <= itemY + 20) {
+                    language = LANG_CODES[i];
                     langMenuOpen = false;
-                    langButton.setMessage(Text.literal(t("Language: ", "Язык: ") + ("ru".equals(language) ? "Русский" : "English")));
+                    langButton.setMessage(Text.literal(t("Change language", "Изменить язык")));
                     previewButton.setMessage(Text.literal(t("Dynamic Preview: ", "Динамический предпросмотр: ") + (showPreview ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"))));
                     saveButton.setMessage(Text.literal(t("Save & Close", "Сохранить и закрыть")));
                     return true;
                 }
-            } else {
+            }
+            
+            // Click outside overlay = close
+            if (mouseX < ox || mouseX > ox + overlayW || mouseY < oy || mouseY > oy + overlayH) {
                 langMenuOpen = false;
                 return true;
             }
-        }
-        
+            return true;
+        }        
         // Tab clicks
         if (mouseX >= menuX && mouseX <= menuX + 120) {
             for (int i = 0; i < 4; i++) {
@@ -309,27 +320,48 @@ public class PromptCraftSettingsScreen extends Screen {
     }
     
     private void renderLangMenu(DrawContext context) {
-        int lx = langMenuX;
-        int ly = langMenuY;
-        // Dark background
-        context.fill(lx, ly, lx + langMenuW, ly + langMenuH, 0xFF2A2A2A);
-        context.fill(lx, ly, lx + langMenuW, ly + 1, 0xFF555555);
-        context.fill(lx, ly + langMenuH - 1, lx + langMenuW, ly + langMenuH, 0xFF111111);
-        context.fill(lx, ly, lx + 1, ly + langMenuH, 0xFF555555);
-        context.fill(lx + langMenuW - 1, ly, lx + langMenuW, ly + langMenuH, 0xFF111111);
+        int cx = this.width / 2;
+        int cy = this.height / 2;
+        int overlayW = 200;
+        int overlayH = 90;
+        int ox = cx - overlayW / 2;
+        int oy = cy - overlayH / 2;
         
+        // Semi-transparent darkening behind overlay
+        context.fill(0, 0, this.width, this.height, 0xCC000000);
+        
+        // Overlay background with 3D pixel border
+        context.fill(ox, oy, ox + overlayW, oy + overlayH, 0xFF1E1E1E);
+        context.fill(ox, oy, ox + overlayW, oy + 1, 0xFF555555);
+        context.fill(ox, oy + overlayH - 1, ox + overlayW, oy + overlayH, 0xFF111111);
+        context.fill(ox, oy, ox + 1, oy + overlayH, 0xFF555555);
+        context.fill(ox + overlayW - 1, oy, ox + overlayW, oy + overlayH, 0xFF111111);
+        
+        // Title
+        String title = t("Select Language", "Выберите язык");
+        context.drawTextWithShadow(this.textRenderer, title, ox + 10, oy + 6, 0xFFFFFF);
+        
+        // Close X button
+        int closeX = ox + overlayW - 22;
+        int closeY = oy + 5;
+        context.fill(closeX, closeY, closeX + 18, closeY + 14, 0xFF2D2D2D);
+        context.fill(closeX, closeY, closeX + 18, closeY + 1, 0xFF444444);
+        context.fill(closeX, closeY + 13, closeX + 18, closeY + 14, 0xFF222222);
+        context.drawText(this.textRenderer, "X", closeX + 6, closeY + 3, 0xFFAAAAAA, false);
+        
+        // Language options
         for (int i = 0; i < LANG_OPTIONS.length; i++) {
-            int itemY = ly + 2 + i * 20;
+            int itemY = oy + 30 + i * 22;
             boolean sel = LANG_CODES[i].equals(language);
             if (sel) {
-                context.fill(lx + 1, itemY, lx + langMenuW - 1, itemY + 18, 0xFFF8F675);
-                context.drawText(this.textRenderer, LANG_OPTIONS[i], lx + 6, itemY + 5, 0x000000, false);
+                context.fill(ox + 10, itemY, ox + overlayW - 10, itemY + 20, 0xFFF8F675);
+                context.drawText(this.textRenderer, LANG_OPTIONS[i], ox + 16, itemY + 6, 0x000000, false);
             } else {
-                context.drawTextWithShadow(this.textRenderer, LANG_OPTIONS[i], lx + 6, itemY + 5, 0xD2D2D2);
+                context.fill(ox + 10, itemY, ox + overlayW - 10, itemY + 20, 0xFF2D2D2D);
+                context.drawTextWithShadow(this.textRenderer, LANG_OPTIONS[i], ox + 16, itemY + 6, 0xD2D2D2);
             }
         }
-    }
-    
+    }    
     private void renderColorPicker(DrawContext context, int x, int y) {
         int svX = x;
         int svY = y;
