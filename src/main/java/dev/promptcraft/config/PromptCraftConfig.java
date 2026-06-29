@@ -12,6 +12,9 @@ public class PromptCraftConfig {
     public boolean enableDestructionAnimation = true;
     public boolean showSelectionPreview = true;
 
+    public boolean thickSelectionOutline = true;
+    public float selectionFillOpacity = 0.075f;
+
     public boolean selectionLimitEnabled = true;
     public int maxSelectionWidth = 64;
     public int maxSelectionHeight = 64;

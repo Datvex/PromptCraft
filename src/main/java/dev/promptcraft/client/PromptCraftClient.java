@@ -36,7 +36,11 @@ public class PromptCraftClient implements ClientModInitializer {
             boolean showPreview = buf.readBoolean();
             String language = buf.readString();
             String themeColor = buf.readString();
-            client.execute(() -> client.setScreen(new PromptCraftSettingsScreen(apiKey, model, showPreview, language, themeColor)));
+            boolean thickOutline = buf.readBoolean();
+            float fillOpacity = buf.readFloat();
+            client.execute(() -> client.setScreen(
+                    new PromptCraftSettingsScreen(apiKey, model, showPreview, language, themeColor, thickOutline, fillOpacity)
+            ));
         });        WorldRenderEvents.LAST.register(context -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null) return;
@@ -118,19 +122,24 @@ public class PromptCraftClient implements ClientModInitializer {
 
             // Заливка области.
             // Box слегка расширен наружу, чтобы плоскости не совпадали с гранями блоков.
+            float fillOpacity = Math.max(0.0f, Math.min(1.0f, PromptCraftConfigManager.get().selectionFillOpacity));
+
             RenderSystem.enablePolygonOffset();
             RenderSystem.polygonOffset(-1.0f, -10.0f);
 
-            buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
-            drawFilledBox(matrix, buffer, fillBox, r, g, b, 0.075f);
-            tessellator.draw();
+            if (fillOpacity > 0.0f) {
+                buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+                drawFilledBox(matrix, buffer, fillBox, r, g, b, fillOpacity);
+                tessellator.draw();
+            }
 
             RenderSystem.polygonOffset(0.0f, 0.0f);
             RenderSystem.disablePolygonOffset();
 
             // Контур поверх заливки.
+            float outlineThickness = PromptCraftConfigManager.get().thickSelectionOutline ? 0.035f : 0.008f;
             buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
-            drawThickOutline(matrix, buffer, outlineBox, 0.035f, r, g, b, 1.0f);
+            drawThickOutline(matrix, buffer, outlineBox, outlineThickness, r, g, b, 1.0f);
             tessellator.draw();
 
             RenderSystem.depthMask(true);

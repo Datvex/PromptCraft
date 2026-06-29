@@ -11,6 +11,7 @@ import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.gui.widget.SliderWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.text.Text;
@@ -32,6 +33,8 @@ public class PromptCraftSettingsScreen extends Screen {
     private FlatButton previewButton;
     private FlatButton saveButton;
     private FlatButton langButton;
+    private FlatButton outlineButton;
+    private OpacitySlider opacitySlider;
     private TextFieldWidget hexColorField;
     private IconButton refreshButton;
 
@@ -40,15 +43,18 @@ public class PromptCraftSettingsScreen extends Screen {
     private boolean showPreview;
     private String language;
     private String themeColor;
+    private boolean thickOutline;
+    private float fillOpacity;
     
     private int selectedTab = 0;
     private static final int TAB_API = 0;
     private static final int TAB_ANIM = 1;
     private static final int TAB_LANG = 2;
     private static final int TAB_THEME = 3;
+    private static final int TAB_VISUAL = 4;
 
-    private static final String[] TAB_NAMES_EN = {"API", "Animations", "Language", "Theme"};
-    private static final String[] TAB_NAMES_RU = {"API", "Анимации", "Язык", "Тема"};
+    private static final String[] TAB_NAMES_EN = {"API", "Animations", "Language", "Theme", "Visual"};
+    private static final String[] TAB_NAMES_RU = {"API", "Анимации", "Язык", "Тема", "Визуал"};
 
     private static final String[] LANG_OPTIONS = {"English", "Русский"};
     private static final String[] LANG_CODES = {"en", "ru"};
@@ -80,13 +86,23 @@ public class PromptCraftSettingsScreen extends Screen {
     private static final int HUE_SEGMENTS = 24;
     private static final int PREVIEW_SIZE = 20;
 
-    public PromptCraftSettingsScreen(String apiKey, String model, boolean showPreview, String language, String themeColor) {
+    public PromptCraftSettingsScreen(
+            String apiKey,
+            String model,
+            boolean showPreview,
+            String language,
+            String themeColor,
+            boolean thickOutline,
+            float fillOpacity
+    ) {
         super(Text.literal("PromptCraft Settings"));
         this.apiKey = apiKey;
         this.model = model;
         this.showPreview = showPreview;
         this.language = language != null ? language : "en";
         this.themeColor = themeColor != null && !themeColor.isEmpty() ? themeColor : "#17b95f";
+        this.thickOutline = thickOutline;
+        this.fillOpacity = Math.max(0.0f, Math.min(1.0f, fillOpacity));
         hexToHsv(this.themeColor);
     }
     
@@ -117,6 +133,10 @@ public class PromptCraftSettingsScreen extends Screen {
         return value.substring(0, maxLength - 3) + "...";
     }
 
+    private String getOutlineButtonText() {
+        return t("Outline: ", "Обводка: ") + (thickOutline ? t("Thick", "Жирная") : t("Vanilla", "Обычная"));
+    }
+
     @Override
     protected void init() {
         int centerX = this.width / 2;
@@ -144,7 +164,29 @@ public class PromptCraftSettingsScreen extends Screen {
         this.addDrawableChild(previewButton);
         
         langButton = new FlatButton(contentX - 5, contentY + 30, 190, 20, Text.literal(t("Change language", "Изменить язык")), button -> langMenuOpen = !langMenuOpen);
-        this.addDrawableChild(langButton);        
+        this.addDrawableChild(langButton);
+
+        outlineButton = new FlatButton(
+                contentX - 5,
+                contentY + 5,
+                190,
+                20,
+                Text.literal(getOutlineButtonText()),
+                button -> {
+                    thickOutline = !thickOutline;
+                    button.setMessage(Text.literal(getOutlineButtonText()));
+                }
+        );
+        this.addDrawableChild(outlineButton);
+
+        opacitySlider = new OpacitySlider(
+                contentX - 5,
+                contentY + 40,
+                190,
+                20,
+                fillOpacity
+        );
+        this.addDrawableChild(opacitySlider);
         
         hexColorField = new TextFieldWidget(this.textRenderer, contentX + 10, contentY + 95, 60, 16, Text.literal("Hex"));
         hexColorField.setMaxLength(7);
@@ -168,6 +210,8 @@ public class PromptCraftSettingsScreen extends Screen {
             buf.writeBoolean(showPreview);
             buf.writeString(language);
             buf.writeString(themeColor);
+            buf.writeBoolean(thickOutline);
+            buf.writeFloat(fillOpacity);
             ClientPlayNetworking.send(PromptCraftNetworking.SAVE_GUI_PACKET, buf);
             this.client.setScreen(null);
         });
@@ -257,6 +301,7 @@ public class PromptCraftSettingsScreen extends Screen {
         boolean isAnim = selectedTab == TAB_ANIM;
         boolean isLang = selectedTab == TAB_LANG;
         boolean isTheme = selectedTab == TAB_THEME;
+        boolean isVisual = selectedTab == TAB_VISUAL;
         
         apiKeyField.visible = isApi;
         apiKeyField.active = isApi;
@@ -275,6 +320,12 @@ public class PromptCraftSettingsScreen extends Screen {
 
         hexColorField.visible = isTheme;
         hexColorField.active = isTheme;
+
+        outlineButton.visible = isVisual;
+        outlineButton.active = isVisual;
+
+        opacitySlider.visible = isVisual;
+        opacitySlider.active = isVisual;
     }
     
     // --- ПЕРЕХВАТ КЛАВИАТУРЫ ДЛЯ ПОЛЯ ПОИСКА ---
@@ -404,6 +455,8 @@ public class PromptCraftSettingsScreen extends Screen {
                     langMenuOpen = false;
                     langButton.setMessage(Text.literal(t("Change language", "Изменить язык")));
                     previewButton.setMessage(Text.literal(t("Dynamic Preview: ", "Динамический предпросмотр: ") + (showPreview ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"))));
+                    outlineButton.setMessage(Text.literal(getOutlineButtonText()));
+                    opacitySlider.updateMessage();
                     saveButton.setMessage(Text.literal(t("Save & Close", "Сохранить и закрыть")));
                     return true;
                 }
@@ -415,7 +468,7 @@ public class PromptCraftSettingsScreen extends Screen {
         }        
         
         if (mouseX >= menuX && mouseX <= menuX + 120) {
-            for (int i = 0; i < 4; i++) {
+            for (int i = 0; i < 5; i++) {
                 int ty = menuY + i * 25;
                 if (mouseY >= ty && mouseY <= ty + 20) {
                     selectedTab = i; updateWidgetVisibility(); return true;
@@ -515,6 +568,7 @@ public class PromptCraftSettingsScreen extends Screen {
         renderMenuItem(context, tabName(1), menuX, menuY + 25, selectedTab == TAB_ANIM, themeColorInt);
         renderMenuItem(context, tabName(2), menuX, menuY + 50, selectedTab == TAB_LANG, themeColorInt);
         renderMenuItem(context, tabName(3), menuX, menuY + 75, selectedTab == TAB_THEME, themeColorInt);
+        renderMenuItem(context, tabName(4), menuX, menuY + 100, selectedTab == TAB_VISUAL, themeColorInt);
         
         if (selectedTab == TAB_API) {
             context.drawTextWithShadow(this.textRenderer, "NVIDIA API Key:", contentX - 5, contentY, 0xFFFFFF);
@@ -535,7 +589,10 @@ public class PromptCraftSettingsScreen extends Screen {
             context.fill(contentX, contentY + 92, contentX + SV_SIZE, contentY + 112, 0xFF2D2D2D);
             int textW = this.textRenderer.getWidth(hexColorField.getText());
             hexColorField.setX(contentX + (80 - textW) / 2);
-        }        
+        } else if (selectedTab == TAB_VISUAL) {
+            context.drawTextWithShadow(this.textRenderer, t("Outline:", "Обводка:"), contentX - 5, contentY - 10, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, t("Fill opacity:", "Прозрачность заливки:"), contentX - 5, contentY + 30, 0xFFFFFF);
+        }
         
         super.render(context, mouseX, mouseY, delta);
 
@@ -726,6 +783,48 @@ public class PromptCraftSettingsScreen extends Screen {
             case 4: r = t; g = p; b = v; break; case 5: r = v; g = p; b = q; break;
         }
         return ((int)(r * 255) << 16) | ((int)(g * 255) << 8) | (int)(b * 255);
+    }
+
+    private class OpacitySlider extends SliderWidget {
+        public OpacitySlider(int x, int y, int width, int height, float initialValue) {
+            super(x, y, width, height, Text.empty(), Math.max(0.0D, Math.min(1.0D, initialValue)));
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            int percent = (int) Math.round(this.value * 100.0D);
+            this.setMessage(Text.literal(t("Opacity: ", "Прозрачность: ") + percent + "%"));
+        }
+
+        @Override
+        protected void applyValue() {
+            fillOpacity = (float) Math.max(0.0D, Math.min(1.0D, this.value));
+        }
+
+        @Override
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            if (!this.visible) {
+                return;
+            }
+
+            int bgColor = this.isHovered() ? 0xFF3D3D3D : 0xFF2D2D2D;
+            int themeColorInt = parseThemeColor(themeColor);
+
+            context.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height, bgColor);
+
+            int fillW = (int) (this.width * this.value);
+            context.fill(this.getX(), this.getY(), this.getX() + fillW, this.getY() + this.height, themeColorInt);
+
+            int knobX = this.getX() + fillW;
+            context.fill(knobX - 2, this.getY() - 2, knobX + 2, this.getY() + this.height + 2, 0xFFFFFFFF);
+
+            int textColor = this.value > 0.45D ? 0x000000 : 0xFFFFFF;
+            int textX = this.getX() + (this.width - PromptCraftSettingsScreen.this.textRenderer.getWidth(this.getMessage())) / 2;
+            int textY = this.getY() + (this.height - 8) / 2;
+
+            context.drawTextWithShadow(PromptCraftSettingsScreen.this.textRenderer, this.getMessage(), textX, textY, textColor);
+        }
     }
 
     private class FlatButton extends ButtonWidget {

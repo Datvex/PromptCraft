@@ -23,6 +23,8 @@ public class PromptCraftNetworking {
             boolean showPreview = buf.readBoolean();
             String language = buf.readString();
             String themeColor = buf.readString();
+            boolean thickOutline = buf.readBoolean();
+            float fillOpacity = buf.readFloat();
 
             server.execute(() -> {
                 PromptCraftEnv.saveNvidiaApiKey(apiKey);
@@ -31,6 +33,8 @@ public class PromptCraftNetworking {
                 config.showSelectionPreview = showPreview;
                 config.language = language;
                 config.themeColor = themeColor;
+                config.thickSelectionOutline = thickOutline;
+                config.selectionFillOpacity = Math.max(0.0f, Math.min(1.0f, fillOpacity));
                 PromptCraftConfigManager.save();
             });
         });
@@ -46,11 +50,16 @@ public class PromptCraftNetworking {
 
     public static void openSettingsGui(ServerPlayerEntity player) {
         PacketByteBuf buf = PacketByteBufs.create();
+        PromptCraftConfig config = PromptCraftConfigManager.get();
+
         buf.writeString(PromptCraftEnv.getNvidiaApiKey());
-        buf.writeString(PromptCraftConfigManager.get().model);
-        buf.writeBoolean(PromptCraftConfigManager.get().showSelectionPreview);
-        buf.writeString(PromptCraftConfigManager.get().language);
-        buf.writeString(PromptCraftConfigManager.get().themeColor);
+        buf.writeString(config.model);
+        buf.writeBoolean(config.showSelectionPreview);
+        buf.writeString(config.language);
+        buf.writeString(config.themeColor);
+        buf.writeBoolean(config.thickSelectionOutline);
+        buf.writeFloat(config.selectionFillOpacity);
+
         ServerPlayNetworking.send(player, OPEN_GUI_PACKET, buf);
     }
 }
