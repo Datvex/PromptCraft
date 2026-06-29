@@ -21,17 +21,20 @@ public class PromptCraftNetworking {
             String apiKey = buf.readString();
             String model = buf.readString();
             boolean showPreview = buf.readBoolean();
+            String language = buf.readString();
+            String themeColor = buf.readString();
 
             server.execute(() -> {
                 PromptCraftEnv.saveNvidiaApiKey(apiKey);
                 PromptCraftConfig config = PromptCraftConfigManager.get();
                 config.model = model;
                 config.showSelectionPreview = showPreview;
+                config.language = language;
+                config.themeColor = themeColor;
                 PromptCraftConfigManager.save();
             });
         });
     }
-
     public static void syncSelection(ServerPlayerEntity player, PlayerSelection selection) {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeBoolean(selection.hasFirst());
@@ -46,6 +49,8 @@ public class PromptCraftNetworking {
         buf.writeString(PromptCraftEnv.getNvidiaApiKey());
         buf.writeString(PromptCraftConfigManager.get().model);
         buf.writeBoolean(PromptCraftConfigManager.get().showSelectionPreview);
+        buf.writeString(PromptCraftConfigManager.get().language);
+        buf.writeString(PromptCraftConfigManager.get().themeColor);
         ServerPlayNetworking.send(player, OPEN_GUI_PACKET, buf);
     }
 }

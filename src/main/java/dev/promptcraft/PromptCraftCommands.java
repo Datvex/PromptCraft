@@ -45,7 +45,7 @@ public final class PromptCraftCommands {
             dispatcher.register(CommandManager.literal("promptundo").executes(context -> handlePromptUndo(context.getSource())));
             dispatcher.register(CommandManager.literal("promptback").executes(context -> handlePromptUndo(context.getSource())));
             dispatcher.register(CommandManager.literal("promptnext").executes(context -> handlePromptNext(context.getSource())));
-            dispatcher.register(CommandManager.literal("promptsettings").executes(context -> handlePromptSettings(context.getSource())));
+            dispatcher.register(CommandManager.literal("psettings").executes(context -> handlePromptSettings(context.getSource())));
         });
     }
 

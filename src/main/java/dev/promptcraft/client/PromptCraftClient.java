@@ -1,7 +1,6 @@
 package dev.promptcraft.client;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-import dev.promptcraft.PromptCraftMod;
 import dev.promptcraft.client.gui.PromptCraftSettingsScreen;
 import dev.promptcraft.config.PromptCraftConfigManager;
 import dev.promptcraft.network.PromptCraftNetworking;
@@ -35,10 +34,10 @@ public class PromptCraftClient implements ClientModInitializer {
             String apiKey = buf.readString();
             String model = buf.readString();
             boolean showPreview = buf.readBoolean();
-            client.execute(() -> client.setScreen(new PromptCraftSettingsScreen(apiKey, model, showPreview)));
-        });
-
-        WorldRenderEvents.LAST.register(context -> {
+            String language = buf.readString();
+            String themeColor = buf.readString();
+            client.execute(() -> client.setScreen(new PromptCraftSettingsScreen(apiKey, model, showPreview, language, themeColor)));
+        });        WorldRenderEvents.LAST.register(context -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null) return;
             

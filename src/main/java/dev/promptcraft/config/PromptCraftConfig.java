@@ -6,6 +6,7 @@ public class PromptCraftConfig {
     public String model = "meta/llama-3.1-70b-instruct";
     public String accessMode = "admins_only";
     public String themeColor = "#17b95f"; // Default neon green
+    public String language = "en"; // en or ru
 
     public boolean showProcessMessages = true;
     public boolean enableDestructionAnimation = true;
