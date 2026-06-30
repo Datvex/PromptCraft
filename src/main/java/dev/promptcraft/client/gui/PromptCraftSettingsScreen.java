@@ -27,9 +27,14 @@ import java.util.List;
 
 public class PromptCraftSettingsScreen extends Screen {
     private static final Identifier REFRESH_ICON = new Identifier(PromptCraftMod.MOD_ID, "textures/gui/refresh_icon.png");
+    private static final Identifier NVIDIA_ICON = new Identifier(PromptCraftMod.MOD_ID, "textures/gui/nvidia.png");
+    private static final String[] PROVIDER_OPTIONS = {"NVIDIA"};
+    private static final String[] PROVIDER_CODES = {"nvidia"};
+    private boolean providerMenuOpen = false;
 
     private PasswordFieldWidget apiKeyField;
     private ModelSelectButton modelButton;
+    private ProviderSelectButton providerButton;
     private FlatButton previewButton;
     private FlatButton saveButton;
     private FlatButton langButton;
@@ -39,6 +44,7 @@ public class PromptCraftSettingsScreen extends Screen {
     private TextFieldWidget hexColorField;
     private IconButton refreshButton;
 
+    private String provider;
     private String apiKey;
     private String model;
     private boolean showPreview;
@@ -89,6 +95,7 @@ public class PromptCraftSettingsScreen extends Screen {
     private static final int PREVIEW_SIZE = 20;
 
     public PromptCraftSettingsScreen(
+            String provider,
             String apiKey,
             String model,
             boolean showPreview,
@@ -99,6 +106,7 @@ public class PromptCraftSettingsScreen extends Screen {
             boolean outlineThroughBlocks
     ) {
         super(Text.literal("PromptCraft Settings"));
+        this.provider = provider != null ? provider : "nvidia";
         this.apiKey = apiKey;
         this.model = model;
         this.showPreview = showPreview;
@@ -154,16 +162,23 @@ public class PromptCraftSettingsScreen extends Screen {
         int contentX = centerX - 30;
         int contentY = menuY;
 
-        apiKeyField = new PasswordFieldWidget(this.textRenderer, contentX + 2, contentY + 18, 178, 12, Text.literal("API Key"));
+        // --- КНОПКА ПРОВАЙДЕРА (Теперь ровно на уровне вкладки API: contentY) ---
+        providerButton = new ProviderSelectButton(contentX - 5, contentY, 190, 20, Text.literal(getProviderDisplayName(provider)), button -> providerMenuOpen = !providerMenuOpen);
+        this.addDrawableChild(providerButton);
+
+        // --- ПОЛЕ API KEY (Сдвинуто так, чтобы сверху влез текст) ---
+        apiKeyField = new PasswordFieldWidget(this.textRenderer, contentX + 2, contentY + 42, 178, 12, Text.literal("API Key"));
         apiKeyField.setMaxLength(200);
         apiKeyField.setText(apiKey);
         apiKeyField.setDrawsBackground(false);
         this.addDrawableChild(apiKeyField);
 
-        modelButton = new ModelSelectButton(contentX - 5, contentY + 57, 160, 22, Text.literal(shortenModelName(model)), button -> openModelList());
+        // --- КНОПКА МОДЕЛИ ---
+        modelButton = new ModelSelectButton(contentX - 5, contentY + 80, 160, 22, Text.literal(shortenModelName(model)), button -> openModelList());
         this.addDrawableChild(modelButton);
 
-        refreshButton = new IconButton(contentX + 160, contentY + 58, 20, 20, REFRESH_ICON, button -> fetchModels());
+        // --- КНОПКА ОБНОВЛЕНИЯ ---
+        refreshButton = new IconButton(contentX + 160, contentY + 81, 20, 20, REFRESH_ICON, button -> fetchModels());
         this.addDrawableChild(refreshButton);
 
         previewButton = new FlatButton(contentX - 5, contentY + 5, 190, 20, Text.literal(t("Dynamic Preview: ", "Динамический предпросмотр: ") + (showPreview ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"))), button -> {
@@ -227,6 +242,7 @@ public class PromptCraftSettingsScreen extends Screen {
         
         saveButton = new FlatButton(centerX - 60, centerY + 90, 120, 20, Text.literal(t("Save & Close", "Сохранить и закрыть")), button -> {
             PacketByteBuf buf = PacketByteBufs.create();
+            buf.writeString(provider);
             buf.writeString(apiKeyField.getText());
             buf.writeString(model);
             buf.writeBoolean(showPreview);
@@ -326,6 +342,9 @@ public class PromptCraftSettingsScreen extends Screen {
         boolean isTheme = selectedTab == TAB_THEME;
         boolean isVisual = selectedTab == TAB_VISUAL;
         
+        providerButton.visible = isApi;
+        providerButton.active = isApi;
+
         apiKeyField.visible = isApi;
         apiKeyField.active = isApi;
 
@@ -420,8 +439,32 @@ public class PromptCraftSettingsScreen extends Screen {
                 || isMouseOverWidget(hexColorField, mouseX, mouseY)
                 || isMouseOverWidget(modelSearchField, mouseX, mouseY);
 
-        if (!clickedInput && !modelMenuOpen && !langMenuOpen) {
+        if (!clickedInput && !modelMenuOpen && !langMenuOpen && !providerMenuOpen) {
             clearInputFocus();
+        }
+
+        // --- НОВАЯ ЛОГИКА ДЛЯ МЕНЮ ПРОВАЙДЕРА ---
+        if (providerMenuOpen) {
+            int overlayW = 200; int overlayH = 90;
+            int ox = (this.width / 2) - overlayW / 2; int oy = (this.height / 2) - overlayH / 2;
+            int closeBtnX = ox + overlayW - 22; int closeBtnY = oy + 4;
+            
+            if (mouseX >= closeBtnX && mouseX <= closeBtnX + 18 && mouseY >= closeBtnY && mouseY <= closeBtnY + 14) {
+                providerMenuOpen = false; return true;
+            }
+            for (int i = 0; i < PROVIDER_OPTIONS.length; i++) {
+                int itemY = oy + 30 + i * 22;
+                if (mouseX >= ox + 10 && mouseX <= ox + overlayW - 10 && mouseY >= itemY && mouseY <= itemY + 20) {
+                    provider = PROVIDER_CODES[i];
+                    providerMenuOpen = false;
+                    providerButton.setMessage(Text.literal(getProviderDisplayName(provider)));
+                    return true;
+                }
+            }
+            if (mouseX < ox || mouseX > ox + overlayW || mouseY < oy || mouseY > oy + overlayH) {
+                providerMenuOpen = false; return true;
+            }
+            return true;
         }
 
         if (modelMenuOpen) {
@@ -598,15 +641,18 @@ public class PromptCraftSettingsScreen extends Screen {
         renderMenuItem(context, tabName(4), menuX, menuY + 100, selectedTab == TAB_VISUAL, themeColorInt);
         
         if (selectedTab == TAB_API) {
-            context.drawTextWithShadow(this.textRenderer, "NVIDIA API Key:", contentX - 5, contentY, 0xFFFFFF);
-            context.drawTextWithShadow(this.textRenderer, "Model:", contentX - 5, contentY + 45, 0xFFFFFF);
+            // Тексты теперь идеально распределены над своими полями
+            context.drawTextWithShadow(this.textRenderer, t("Provider:", "Провайдер:"), contentX - 5, contentY - 12, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, "API Key:", contentX - 5, contentY + 26, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, "Model:", contentX - 5, contentY + 68, 0xFFFFFF);
 
-            context.fill(contentX - 5, contentY + 12, contentX + 185, contentY + 34, 0xFF2D2D2D);
+            // ВАЖНО: Убрана ручная отрисовка фона (context.fill) для API Key,
+            // так как класс PasswordFieldWidget уже рисует свой собственный фон с отступами!
 
             if (isFetchingModels) {
-                context.drawTextWithShadow(this.textRenderer, t("Fetching...", "Загрузка..."), contentX - 5, contentY + 85, 0xAAAAAA);
+                context.drawTextWithShadow(this.textRenderer, t("Fetching...", "Загрузка..."), contentX - 5, contentY + 110, 0xAAAAAA);
             } else if (fetchError != null) {
-                context.drawTextWithShadow(this.textRenderer, fetchError, contentX - 5, contentY + 85, 0xFF5555);
+                context.drawTextWithShadow(this.textRenderer, fetchError, contentX - 5, contentY + 110, 0xFF5555);
             }
         } else if (selectedTab == TAB_LANG) {
             context.drawTextWithShadow(this.textRenderer, t("Current language:", "Текущий язык:"), contentX - 5, contentY, 0xFFFFFF);
@@ -624,9 +670,73 @@ public class PromptCraftSettingsScreen extends Screen {
         
         super.render(context, mouseX, mouseY, delta);
 
+        if (providerMenuOpen) renderProviderMenu(context);
         if (langMenuOpen) renderLangMenu(context);
         if (modelMenuOpen) renderModelMenu(context, mouseX, mouseY, delta);
     }    
+
+    // -- Provider helpers --
+    private String getProviderDisplayName(String code) {
+        for (int i = 0; i < PROVIDER_CODES.length; i++) {
+            if (PROVIDER_CODES[i].equals(code)) return PROVIDER_OPTIONS[i];
+        }
+        return code.toUpperCase();
+    }
+
+    private void renderProviderMenu(DrawContext context) {
+        context.getMatrices().push();
+        context.getMatrices().translate(0.0f, 0.0f, 400.0f);
+        int cx = this.width / 2; int cy = this.height / 2;
+        int overlayW = 200; int overlayH = 90;
+        int ox = cx - overlayW / 2; int oy = cy - overlayH / 2;
+        
+        context.fill(0, 0, this.width, this.height, 0x80000000);
+        context.fill(ox, oy, ox + overlayW, oy + overlayH, 0xFF1E1E1E);
+        context.fill(ox, oy, ox + overlayW, oy + 1, 0xFF555555);
+        context.fill(ox, oy + overlayH - 1, ox + overlayW, oy + overlayH, 0xFF111111);
+        context.fill(ox, oy, ox + 1, oy + overlayH, 0xFF555555);
+        context.fill(ox + overlayW - 1, oy, ox + overlayW, oy + overlayH, 0xFF111111);
+        
+        String title = t("Select Provider", "Выберите провайдера");
+        context.drawTextWithShadow(this.textRenderer, title, ox + 10, oy + 6, 0xFFFFFF);
+        
+        int closeX = ox + overlayW - 22; int closeY = oy + 5;
+        context.fill(closeX, closeY, closeX + 18, closeY + 14, 0xFF2D2D2D);
+        context.drawText(this.textRenderer, "X", closeX + 6, closeY + 3, 0xFFAAAAAA, false);
+        
+        int themeColorInt = parseThemeColor(themeColor);
+        for (int i = 0; i < PROVIDER_OPTIONS.length; i++) {
+            int itemY = oy + 30 + i * 22;
+            boolean sel = PROVIDER_CODES[i].equals(provider);
+            
+            if (sel) {
+                context.fill(ox + 10, itemY, ox + overlayW - 10, itemY + 20, themeColorInt);
+                context.drawText(this.textRenderer, PROVIDER_OPTIONS[i], ox + 38, itemY + 6, 0x000000, false);
+            } else {
+                context.fill(ox + 10, itemY, ox + overlayW - 10, itemY + 20, 0xFF2D2D2D);
+                context.drawTextWithShadow(this.textRenderer, PROVIDER_OPTIONS[i], ox + 38, itemY + 6, 0xD2D2D2);
+            }
+
+            Identifier icon = PROVIDER_CODES[i].equals("nvidia") ? NVIDIA_ICON : null;
+            if (icon != null) {
+                int iconX = ox + 14;
+                int iconY = itemY + 1;
+                
+                // --- ДИЗАЙНЕРСКОЕ РЕШЕНИЕ: Вдавленный слот ---
+                context.fill(iconX, iconY, iconX + 18, iconY + 18, 0xFF181818); // Темный фон
+                context.fill(iconX, iconY, iconX + 18, iconY + 1, 0xFF0A0A0A);  // Верхняя тень
+                context.fill(iconX, iconY, iconX + 1, iconY + 18, 0xFF0A0A0A);  // Левая тень
+                context.fill(iconX, iconY + 17, iconX + 18, iconY + 18, 0xFF4A4A4A); // Нижний блик
+                context.fill(iconX + 17, iconY, iconX + 18, iconY + 18, 0xFF4A4A4A); // Правый блик
+
+                context.getMatrices().push();
+                context.getMatrices().translate(iconX + 1, iconY + 1, 0);
+                context.drawTexture(icon, 0, 0, 0, 0, 16, 16, 16, 16);
+                context.getMatrices().pop();
+            }
+        }
+        context.getMatrices().pop();
+    }
 
     private void renderModelMenu(DrawContext context, int mouseX, int mouseY, float delta) {
         context.getMatrices().push();
@@ -1010,6 +1120,47 @@ public class PromptCraftSettingsScreen extends Screen {
 
             int cursorX = textX + PromptCraftSettingsScreen.this.textRenderer.getWidth(shown);
             context.fill(cursorX + 1, textY, cursorX + 2, textY + 11, 0xFFFFFFFF);
+        }
+    }
+
+    private class ProviderSelectButton extends FlatButton {
+        public ProviderSelectButton(int x, int y, int width, int height, Text message, PressAction onPress) {
+            super(x, y, width, height, message, onPress);
+        }
+
+        @Override
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            if (!this.visible) return;
+            int bgColor = this.isHovered() ? 0xFF3D3D3D : 0xFF2D2D2D;
+            int textColor = this.isHovered() ? 0xFFFFFF : 0xD2D2D2;
+
+            context.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height, bgColor);
+
+            Identifier icon = provider.equals("nvidia") ? NVIDIA_ICON : null;
+            int textOffsetX = 7;
+            
+            if (icon != null) {
+                int iconX = this.getX() + 4;
+                int iconY = this.getY() + 1;
+                
+                // --- ДИЗАЙНЕРСКОЕ РЕШЕНИЕ: Вдавленный слот на кнопке ---
+                context.fill(iconX, iconY, iconX + 18, iconY + 18, 0xFF181818);
+                context.fill(iconX, iconY, iconX + 18, iconY + 1, 0xFF0A0A0A);
+                context.fill(iconX, iconY, iconX + 1, iconY + 18, 0xFF0A0A0A);
+                context.fill(iconX, iconY + 17, iconX + 18, iconY + 18, 0xFF4A4A4A);
+                context.fill(iconX + 17, iconY, iconX + 18, iconY + 18, 0xFF4A4A4A);
+
+                context.getMatrices().push();
+                context.getMatrices().translate(iconX + 1, iconY + 1, 0);
+                context.drawTexture(icon, 0, 0, 0, 0, 16, 16, 16, 16);
+                context.getMatrices().pop();
+                
+                textOffsetX = 28; // Сдвигаем текст правее
+            }
+
+            int textY = this.getY() + (this.height - 8) / 2;
+            context.drawTextWithShadow(PromptCraftSettingsScreen.this.textRenderer, this.getMessage(), this.getX() + textOffsetX, textY, textColor);
+            context.drawTextWithShadow(PromptCraftSettingsScreen.this.textRenderer, "▼", this.getX() + this.width - 14, textY, textColor);
         }
     }
 

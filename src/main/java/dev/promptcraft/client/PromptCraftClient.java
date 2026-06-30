@@ -32,6 +32,7 @@ public class PromptCraftClient implements ClientModInitializer {
         });
 
         ClientPlayNetworking.registerGlobalReceiver(PromptCraftNetworking.OPEN_GUI_PACKET, (client, handler, buf, responseSender) -> {
+            String provider = buf.readString();
             String apiKey = buf.readString();
             String model = buf.readString();
             boolean showPreview = buf.readBoolean();
@@ -42,6 +43,7 @@ public class PromptCraftClient implements ClientModInitializer {
             boolean outlineThroughBlocks = buf.readBoolean();
             client.execute(() -> client.setScreen(
                     new PromptCraftSettingsScreen(
+                            provider,
                             apiKey,
                             model,
                             showPreview,

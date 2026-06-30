@@ -18,6 +18,7 @@ public class PromptCraftNetworking {
 
     public static void registerServerReceivers() {
         ServerPlayNetworking.registerGlobalReceiver(SAVE_GUI_PACKET, (server, player, handler, buf, responseSender) -> {
+            String provider = buf.readString();
             String apiKey = buf.readString();
             String model = buf.readString();
             boolean showPreview = buf.readBoolean();
@@ -30,6 +31,7 @@ public class PromptCraftNetworking {
             server.execute(() -> {
                 PromptCraftEnv.saveNvidiaApiKey(apiKey);
                 PromptCraftConfig config = PromptCraftConfigManager.get();
+                config.provider = provider;
                 config.model = model;
                 config.showSelectionPreview = showPreview;
                 config.language = language;
@@ -54,6 +56,7 @@ public class PromptCraftNetworking {
         PacketByteBuf buf = PacketByteBufs.create();
         PromptCraftConfig config = PromptCraftConfigManager.get();
 
+        buf.writeString(config.provider);
         buf.writeString(PromptCraftEnv.getNvidiaApiKey());
         buf.writeString(config.model);
         buf.writeBoolean(config.showSelectionPreview);
