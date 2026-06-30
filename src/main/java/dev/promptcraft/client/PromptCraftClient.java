@@ -33,7 +33,13 @@ public class PromptCraftClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(PromptCraftNetworking.OPEN_GUI_PACKET, (client, handler, buf, responseSender) -> {
             String provider = buf.readString();
-            String apiKey = buf.readString();
+            
+            int keyCount = buf.readInt();
+            java.util.Map<String, String> apiKeys = new java.util.HashMap<>();
+            for (int i = 0; i < keyCount; i++) {
+                apiKeys.put(buf.readString(), buf.readString());
+            }
+            
             String model = buf.readString();
             boolean showPreview = buf.readBoolean();
             String language = buf.readString();
@@ -41,10 +47,11 @@ public class PromptCraftClient implements ClientModInitializer {
             boolean thickOutline = buf.readBoolean();
             float fillOpacity = buf.readFloat();
             boolean outlineThroughBlocks = buf.readBoolean();
+            
             client.execute(() -> client.setScreen(
                     new PromptCraftSettingsScreen(
                             provider,
-                            apiKey,
+                            apiKeys, // Передаем словарь вместо одной строки
                             model,
                             showPreview,
                             language,

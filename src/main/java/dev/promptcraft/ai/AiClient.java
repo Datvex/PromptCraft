@@ -24,7 +24,7 @@ public class AiClient {
 
     public static CompletableFuture<PromptCraftStructure> requestBuild(ServerPlayerEntity player, String prompt, int width, int height, int depth) {
         PromptCraftConfig config = PromptCraftConfigManager.get();
-        String apiKey = PromptCraftEnv.getNvidiaApiKey(); // Используем то же поле ключа для всех
+        String apiKey = PromptCraftEnv.getApiKey(config.provider); // Получаем ключ ИМЕННО для текущего провайдера
 
         if (apiKey == null || apiKey.isEmpty()) {
             player.sendMessage(Text.literal("API Key is missing! Please use /psettings").formatted(Formatting.RED), false);

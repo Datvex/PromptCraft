@@ -23,7 +23,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class PromptCraftSettingsScreen extends Screen {
     private static final Identifier REFRESH_ICON = new Identifier(PromptCraftMod.MOD_ID, "textures/gui/refresh_icon.png");
@@ -91,7 +93,7 @@ public class PromptCraftSettingsScreen extends Screen {
     private TextFieldWidget modelSearchField;
 
     private String provider;
-    private String apiKey;
+    private Map<String, String> apiKeys;
     private String model;
     private boolean showPreview;
     private String language;
@@ -121,7 +123,7 @@ public class PromptCraftSettingsScreen extends Screen {
 
     public PromptCraftSettingsScreen(
             String provider,
-            String apiKey,
+            Map<String, String> apiKeys,
             String model,
             boolean showPreview,
             String language,
@@ -132,7 +134,7 @@ public class PromptCraftSettingsScreen extends Screen {
     ) {
         super(Text.literal("PromptCraft Settings"));
         this.provider = provider != null && !provider.isBlank() ? provider : "nvidia";
-        this.apiKey = apiKey != null ? apiKey : "";
+        this.apiKeys = apiKeys != null ? apiKeys : new HashMap<>();
         this.model = model != null ? model : "";
         this.showPreview = showPreview;
         this.language = language != null ? language : "en";
@@ -171,8 +173,9 @@ public class PromptCraftSettingsScreen extends Screen {
 
         apiKeyField = new PasswordFieldWidget(this.textRenderer, contentX + 2, contentY + 42, 178, 12, Text.literal("API Key"));
         apiKeyField.setMaxLength(300);
-        apiKeyField.setText(apiKey);
+        apiKeyField.setText(apiKeys.getOrDefault(provider, ""));
         apiKeyField.setDrawsBackground(false);
+        apiKeyField.setChangedListener(text -> apiKeys.put(this.provider, text)); // Сохраняем ключ в словарь при каждом изменении
         this.addDrawableChild(apiKeyField);
 
         modelButton = new ModelSelectButton(
@@ -259,7 +262,15 @@ public class PromptCraftSettingsScreen extends Screen {
         saveButton = new FlatButton(centerX - 60, centerY + 90, 120, 20, Text.literal(t("Save & Close", "Сохранить и закрыть")), button -> {
             PacketByteBuf buf = PacketByteBufs.create();
             buf.writeString(provider);
-            buf.writeString(apiKeyField.getText());
+            
+            Map<String, String> updatedKeys = new HashMap<>(apiKeys);
+            updatedKeys.put(provider, apiKeyField.getText().trim());
+            buf.writeInt(updatedKeys.size());
+            for (Map.Entry<String, String> entry : updatedKeys.entrySet()) {
+                buf.writeString(entry.getKey());
+                buf.writeString(entry.getValue());
+            }
+            
             buf.writeString(model);
             buf.writeBoolean(showPreview);
             buf.writeString(language);
@@ -578,6 +589,7 @@ public class PromptCraftSettingsScreen extends Screen {
                 filteredModels.clear();
                 model = getDefaultModelForProvider(provider);
                 modelButton.setMessage(Text.literal(shortenModelName(model)));
+                apiKeyField.setText(apiKeys.getOrDefault(provider, ""));
 
                 return true;
             }
@@ -1006,8 +1018,16 @@ public class PromptCraftSettingsScreen extends Screen {
             return t("Select model", "Выбрать модель");
         }
 
-        int maxLength = 28;
-        return value.length() <= maxLength ? value : value.substring(0, maxLength - 3) + "...";
+        // Высчитываем доступное место: 160 (ширина кнопки) - 7 (отступ слева) - 20 (место под стрелочку) = 133
+        int maxWidth = 130; 
+        
+        // Если текст в пикселях шире, чем доступное место, обрезаем его и добавляем троеточие
+        if (this.textRenderer.getWidth(value) > maxWidth) {
+            int availableWidth = maxWidth - this.textRenderer.getWidth("...");
+            return this.textRenderer.trimToWidth(value, availableWidth) + "...";
+        }
+
+        return value;
     }
 
     private String getOutlineButtonText() {

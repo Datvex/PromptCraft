@@ -11,6 +11,9 @@ import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Identifier;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class PromptCraftNetworking {
     public static final Identifier SELECTION_SYNC_PACKET = new Identifier(PromptCraftMod.MOD_ID, "selection_sync");
     public static final Identifier OPEN_GUI_PACKET = new Identifier(PromptCraftMod.MOD_ID, "open_gui");
@@ -19,7 +22,13 @@ public class PromptCraftNetworking {
     public static void registerServerReceivers() {
         ServerPlayNetworking.registerGlobalReceiver(SAVE_GUI_PACKET, (server, player, handler, buf, responseSender) -> {
             String provider = buf.readString();
-            String apiKey = buf.readString();
+            
+            int keyCount = buf.readInt();
+            Map<String, String> apiKeys = new HashMap<>();
+            for (int i = 0; i < keyCount; i++) {
+                apiKeys.put(buf.readString(), buf.readString());
+            }
+            
             String model = buf.readString();
             boolean showPreview = buf.readBoolean();
             String language = buf.readString();
@@ -29,7 +38,7 @@ public class PromptCraftNetworking {
             boolean outlineThroughBlocks = buf.readBoolean();
 
             server.execute(() -> {
-                PromptCraftEnv.saveNvidiaApiKey(apiKey);
+                PromptCraftEnv.saveApiKeys(apiKeys);
                 PromptCraftConfig config = PromptCraftConfigManager.get();
                 config.provider = provider;
                 config.model = model;
@@ -43,6 +52,7 @@ public class PromptCraftNetworking {
             });
         });
     }
+
     public static void syncSelection(ServerPlayerEntity player, PlayerSelection selection) {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeBoolean(selection.hasFirst());
@@ -57,7 +67,14 @@ public class PromptCraftNetworking {
         PromptCraftConfig config = PromptCraftConfigManager.get();
 
         buf.writeString(config.provider);
-        buf.writeString(PromptCraftEnv.getNvidiaApiKey());
+        
+        Map<String, String> keys = PromptCraftEnv.getAllApiKeys();
+        buf.writeInt(keys.size());
+        for (Map.Entry<String, String> entry : keys.entrySet()) {
+            buf.writeString(entry.getKey());
+            buf.writeString(entry.getValue());
+        }
+        
         buf.writeString(config.model);
         buf.writeBoolean(config.showSelectionPreview);
         buf.writeString(config.language);
