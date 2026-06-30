@@ -1,6 +1,7 @@
 package dev.promptcraft.ai;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import dev.promptcraft.config.PromptCraftConfig;
 import dev.promptcraft.config.PromptCraftConfigManager;
@@ -19,14 +20,14 @@ import java.util.concurrent.CompletableFuture;
 
 public class AiClient {
     private static final Gson GSON = new Gson();
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(45)).build();
 
     public static CompletableFuture<PromptCraftStructure> requestBuild(ServerPlayerEntity player, String prompt, int width, int height, int depth) {
         PromptCraftConfig config = PromptCraftConfigManager.get();
-        String apiKey = PromptCraftEnv.getNvidiaApiKey();
+        String apiKey = PromptCraftEnv.getNvidiaApiKey(); // Используем то же поле ключа для всех
 
         if (apiKey == null || apiKey.isEmpty()) {
-            player.sendMessage(Text.literal("API Key is missing! Please use /promptsettings").formatted(Formatting.RED), false);
+            player.sendMessage(Text.literal("API Key is missing! Please use /psettings").formatted(Formatting.RED), false);
             return CompletableFuture.completedFuture(null);
         }
 
@@ -35,25 +36,8 @@ public class AiClient {
                 "The building must fit exactly within a bounding box of width " + width + ", height " + height + ", and depth " + depth + ". " +
                 "Use available Minecraft 1.20 Java Edition blocks. Coordinates are relative integers, from [0,0,0] to [" + (width - 1) + "," + (height - 1) + "," + (depth - 1) + "].";
 
-        JsonObject sysMsg = new JsonObject();
-        sysMsg.addProperty("role", "system");
-        sysMsg.addProperty("content", systemPrompt);
-
-        JsonObject usrMsg = new JsonObject();
-        usrMsg.addProperty("role", "user");
-        usrMsg.addProperty("content", "Build: " + prompt);
-
-        JsonObject payload = new JsonObject();
-        payload.addProperty("model", config.model);
-        payload.addProperty("temperature", 0.3);
-        payload.add("messages", GSON.toJsonTree(new JsonObject[]{sysMsg, usrMsg}));
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.baseUrl + "/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
-                .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
-                .build();
+        String userPrompt = "Build: " + prompt;
+        HttpRequest request = buildRequest(config, apiKey, systemPrompt, userPrompt);
 
         return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
@@ -63,9 +47,9 @@ public class AiClient {
                     }
                     try {
                         JsonObject root = GSON.fromJson(response.body(), JsonObject.class);
-                        String content = root.getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonObject("message").get("content").getAsString();
+                        String content = extractContent(config.provider, root);
                         
-                        // Strip markdown formatting if AI disobeys
+                        // Очистка от маркдауна, если ИИ всё же его добавил
                         content = content.replace("```json", "").replace("```", "").trim();
                         
                         return GSON.fromJson(content, PromptCraftStructure.class);
@@ -74,5 +58,93 @@ public class AiClient {
                         return null;
                     }
                 });
+    }
+
+    private static HttpRequest buildRequest(PromptCraftConfig config, String apiKey, String systemPrompt, String userPrompt) {
+        JsonObject payload = new JsonObject();
+        String url;
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().header("Content-Type", "application/json");
+
+        switch (config.provider) {
+            case "anthropic":
+                url = "https://api.anthropic.com/v1/messages";
+                requestBuilder.header("x-api-key", apiKey).header("anthropic-version", "2023-06-01");
+                
+                payload.addProperty("model", config.model);
+                payload.addProperty("max_tokens", 4096);
+                payload.addProperty("temperature", 0.3);
+                payload.addProperty("system", systemPrompt);
+                
+                JsonObject anthropicMsg = new JsonObject();
+                anthropicMsg.addProperty("role", "user");
+                anthropicMsg.addProperty("content", userPrompt);
+                payload.add("messages", GSON.toJsonTree(new JsonObject[]{anthropicMsg}));
+                break;
+
+            case "gemini":
+                url = "https://generativelanguage.googleapis.com/v1beta/models/" + config.model + ":generateContent";
+                requestBuilder.header("x-goog-api-key", apiKey);
+
+                JsonObject sysPart = new JsonObject(); sysPart.addProperty("text", systemPrompt);
+                JsonArray sysParts = new JsonArray(); sysParts.add(sysPart);
+                JsonObject sysInst = new JsonObject(); sysInst.add("parts", sysParts);
+
+                JsonObject usrPart = new JsonObject(); usrPart.addProperty("text", userPrompt);
+                JsonArray usrParts = new JsonArray(); usrParts.add(usrPart);
+                JsonObject usrContent = new JsonObject(); usrContent.addProperty("role", "user"); usrContent.add("parts", usrParts);
+                JsonArray contents = new JsonArray(); contents.add(usrContent);
+
+                JsonObject genConfig = new JsonObject(); genConfig.addProperty("temperature", 0.3);
+
+                payload.add("systemInstruction", sysInst);
+                payload.add("contents", contents);
+                payload.add("generationConfig", genConfig);
+                break;
+
+            default: // OpenAI-совместимые (NVIDIA, OpenAI, DeepSeek, OpenRouter, xAI)
+                url = switch (config.provider) {
+                    case "openai" -> "https://api.openai.com/v1/chat/completions";
+                    case "deepseek" -> "https://api.deepseek.com/chat/completions";
+                    case "openrouter" -> "https://openrouter.ai/api/v1/chat/completions";
+                    case "xai" -> "https://api.x.ai/v1/chat/completions";
+                    default -> "https://integrate.api.nvidia.com/v1/chat/completions";
+                };
+                
+                requestBuilder.header("Authorization", "Bearer " + apiKey);
+                
+                // Для OpenRouter полезно передавать заголовки приложения
+                if (config.provider.equals("openrouter")) {
+                    requestBuilder.header("HTTP-Referer", "https://github.com/PromptCraft");
+                    requestBuilder.header("X-OpenRouter-Title", "PromptCraft Mod");
+                }
+
+                JsonObject sysMsg = new JsonObject();
+                sysMsg.addProperty("role", "system");
+                sysMsg.addProperty("content", systemPrompt);
+
+                JsonObject usrMsg = new JsonObject();
+                usrMsg.addProperty("role", "user");
+                usrMsg.addProperty("content", userPrompt);
+
+                payload.addProperty("model", config.model);
+                payload.addProperty("temperature", 0.3);
+                payload.add("messages", GSON.toJsonTree(new JsonObject[]{sysMsg, usrMsg}));
+                break;
+        }
+
+        return requestBuilder.uri(URI.create(url)).POST(HttpRequest.BodyPublishers.ofString(payload.toString())).build();
+    }
+
+    private static String extractContent(String provider, JsonObject root) {
+        if ("anthropic".equals(provider)) {
+            return root.getAsJsonArray("content").get(0).getAsJsonObject().get("text").getAsString();
+        } else if ("gemini".equals(provider)) {
+            return root.getAsJsonArray("candidates").get(0).getAsJsonObject()
+                    .getAsJsonObject("content").getAsJsonArray("parts").get(0).getAsJsonObject().get("text").getAsString();
+        } else {
+            // OpenAI-совместимый ответ
+            return root.getAsJsonArray("choices").get(0).getAsJsonObject()
+                    .getAsJsonObject("message").get("content").getAsString();
+        }
     }
 }
