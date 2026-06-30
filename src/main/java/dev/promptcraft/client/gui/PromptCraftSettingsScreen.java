@@ -178,7 +178,7 @@ public class PromptCraftSettingsScreen extends Screen {
         this.addDrawableChild(modelButton);
 
         // --- КНОПКА ОБНОВЛЕНИЯ ---
-        refreshButton = new IconButton(contentX + 160, contentY + 81, 20, 20, REFRESH_ICON, button -> fetchModels());
+        refreshButton = new IconButton(contentX + 160, contentY + 80, 22, 22, REFRESH_ICON, button -> fetchModels());
         this.addDrawableChild(refreshButton);
 
         previewButton = new FlatButton(contentX - 5, contentY + 5, 190, 20, Text.literal(t("Dynamic Preview: ", "Динамический предпросмотр: ") + (showPreview ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"))), button -> {
@@ -1176,7 +1176,8 @@ public class PromptCraftSettingsScreen extends Screen {
             int bgColor = this.isHovered() ? 0xFF3D3D3D : 0xFF2D2D2D;
             context.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height, bgColor);
             context.getMatrices().push();
-            context.getMatrices().translate(this.getX() + 2, this.getY() + 2, 0);
+            // Изменили отступ с +2 на +3 для идеального центрирования в кнопке 22x22
+            context.getMatrices().translate(this.getX() + 3, this.getY() + 3, 0); 
             context.getMatrices().scale(0.5f, 0.5f, 1.0f);
             context.drawTexture(texture, 0, 0, 0, 0, 32, 32, 32, 32);
             context.getMatrices().pop();
