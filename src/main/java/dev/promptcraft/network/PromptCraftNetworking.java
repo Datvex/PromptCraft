@@ -18,6 +18,8 @@ public class PromptCraftNetworking {
     public static final Identifier SELECTION_SYNC_PACKET = new Identifier(PromptCraftMod.MOD_ID, "selection_sync");
     public static final Identifier OPEN_GUI_PACKET = new Identifier(PromptCraftMod.MOD_ID, "open_gui");
     public static final Identifier SAVE_GUI_PACKET = new Identifier(PromptCraftMod.MOD_ID, "save_gui");
+    public static final Identifier REQUEST_OPEN_GUI_PACKET = new Identifier(PromptCraftMod.MOD_ID, "request_open_gui");
+    public static final Identifier GUI_ACTION_PACKET = new Identifier(PromptCraftMod.MOD_ID, "gui_action");
 
     public static void registerServerReceivers() {
         ServerPlayNetworking.registerGlobalReceiver(SAVE_GUI_PACKET, (server, player, handler, buf, responseSender) -> {
@@ -49,6 +51,63 @@ public class PromptCraftNetworking {
                 config.selectionFillOpacity = Math.max(0.0f, Math.min(1.0f, fillOpacity));
                 config.selectionOutlineThroughBlocks = outlineThroughBlocks;
                 PromptCraftConfigManager.save();
+            });
+        });
+
+        ServerPlayNetworking.registerGlobalReceiver(REQUEST_OPEN_GUI_PACKET, (server, player, handler, buf, responseSender) -> {
+            server.execute(() -> {
+                if (dev.promptcraft.PromptCraftCommands.hasAccess(player)) {
+                    openSettingsGui(player);
+                }
+            });
+        });
+
+        ServerPlayNetworking.registerGlobalReceiver(GUI_ACTION_PACKET, (server, player, handler, buf, responseSender) -> {
+            String action = buf.readString();
+            String promptText = buf.readString();
+
+            server.execute(() -> {
+                if (!dev.promptcraft.PromptCraftCommands.hasAccess(player)) return;
+                if (!player.isCreative()) {
+                    player.sendMessage(net.minecraft.text.Text.literal("You must be in creative mode.").formatted(net.minecraft.util.Formatting.RED), false);
+                    return;
+                }
+
+                if ("generate".equals(action)) {
+                    dev.promptcraft.selection.PlayerSelection selection = dev.promptcraft.selection.SelectionManager.get(player);
+                    if (!selection.isComplete()) {
+                        player.sendMessage(net.minecraft.text.Text.literal("You must select an area first!").formatted(net.minecraft.util.Formatting.RED), false);
+                        return;
+                    }
+                    dev.promptcraft.session.PendingPrompt prompt = new dev.promptcraft.session.PendingPrompt(promptText, selection.getMin(), selection.getMax(), selection.getWidth(), selection.getHeight(), selection.getDepth());
+                    dev.promptcraft.session.PromptSessionManager.setLast(player, prompt);
+                    executeBuildProcess(player, prompt);
+
+                } else if ("edit".equals(action)) {
+                    var lastOpt = dev.promptcraft.session.PromptSessionManager.getLast(player);
+                    if (lastOpt.isEmpty()) {
+                        player.sendMessage(net.minecraft.text.Text.literal("No previous prompt to edit!").formatted(net.minecraft.util.Formatting.RED), false);
+                        return;
+                    }
+                    dev.promptcraft.session.PendingPrompt last = lastOpt.get();
+                    String combined = "Original request: " + last.getPrompt() + ". User edit request: " + promptText + ". Please modify the design accordingly.";
+                    dev.promptcraft.session.PendingPrompt newPrompt = new dev.promptcraft.session.PendingPrompt(combined, last.getSelectionMin(), last.getSelectionMax(), last.getWidth(), last.getHeight(), last.getDepth());
+                    dev.promptcraft.session.PromptSessionManager.setLast(player, newPrompt);
+                    executeBuildProcess(player, newPrompt);
+
+                } else if ("undo".equals(action) || "back".equals(action)) {
+                    if (dev.promptcraft.structure.HistoryManager.undo(player)) {
+                        player.sendMessage(net.minecraft.text.Text.literal("Step back successful.").formatted(net.minecraft.util.Formatting.GREEN), false);
+                    } else {
+                        player.sendMessage(net.minecraft.text.Text.literal("Nothing to undo.").formatted(net.minecraft.util.Formatting.RED), false);
+                    }
+                } else if ("next".equals(action)) {
+                    if (dev.promptcraft.structure.HistoryManager.redo(player)) {
+                        player.sendMessage(net.minecraft.text.Text.literal("Step forward successful.").formatted(net.minecraft.util.Formatting.GREEN), false);
+                    } else {
+                        player.sendMessage(net.minecraft.text.Text.literal("Nothing to redo.").formatted(net.minecraft.util.Formatting.RED), false);
+                    }
+                }
             });
         });
     }
@@ -84,5 +143,21 @@ public class PromptCraftNetworking {
         buf.writeBoolean(config.selectionOutlineThroughBlocks);
 
         ServerPlayNetworking.send(player, OPEN_GUI_PACKET, buf);
+    }
+
+    private static void executeBuildProcess(ServerPlayerEntity player, dev.promptcraft.session.PendingPrompt prompt) {
+        player.sendMessage(net.minecraft.text.Text.literal("Preparing area...").formatted(net.minecraft.util.Formatting.YELLOW), false);
+        dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.DestructionTask(player, prompt.getSelectionMin(), prompt.getSelectionMax(), () -> {
+            player.sendMessage(net.minecraft.text.Text.literal("Area cleared. Contacting AI...").formatted(net.minecraft.util.Formatting.AQUA), false);
+            dev.promptcraft.ai.AiClient.requestBuild(player, prompt.getPrompt(), prompt.getWidth(), prompt.getHeight(), prompt.getDepth())
+                .thenAccept(structure -> {
+                    if (structure != null && player.getServer() != null) {
+                        player.getServer().execute(() -> {
+                            player.sendMessage(net.minecraft.text.Text.literal("AI response received! Building...").formatted(net.minecraft.util.Formatting.GREEN), false);
+                            dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.BuildTask(player, prompt.getSelectionMin(), structure));
+                        });
+                    }
+                });
+        }));
     }
 }

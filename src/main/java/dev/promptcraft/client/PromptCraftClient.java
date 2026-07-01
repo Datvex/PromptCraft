@@ -23,6 +23,22 @@ public class PromptCraftClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        // Регистрация кнопки K (свободна в ваниле)
+        net.minecraft.client.option.KeyBinding openMenuKey = net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper.registerKeyBinding(new net.minecraft.client.option.KeyBinding(
+                "key.promptcraft.open_menu",
+                net.minecraft.client.util.InputUtil.Type.KEYSYM,
+                org.lwjgl.glfw.GLFW.GLFW_KEY_K,
+                "category.promptcraft"
+        ));
+
+        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            while (openMenuKey.wasPressed()) {
+                if (client.player != null && client.currentScreen == null) {
+                    net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(PromptCraftNetworking.REQUEST_OPEN_GUI_PACKET, net.fabricmc.fabric.api.networking.v1.PacketByteBufs.create());
+                }
+            }
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(PromptCraftNetworking.SELECTION_SYNC_PACKET, (client, handler, buf, responseSender) -> {
             boolean hasFirst = buf.readBoolean();
             BlockPos first = hasFirst ? buf.readBlockPos() : null;

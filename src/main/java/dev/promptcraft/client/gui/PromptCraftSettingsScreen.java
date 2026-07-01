@@ -12,6 +12,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.SliderWidget;
+import net.minecraft.client.gui.widget.EditBoxWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.text.Text;
@@ -39,36 +40,37 @@ public class PromptCraftSettingsScreen extends Screen {
     private static final Identifier OPENROUTER_ICON = new Identifier(PromptCraftMod.MOD_ID, "textures/gui/openrouter.png");
 
     private static final String[] PROVIDER_OPTIONS = {
-            "NVIDIA",
-            "OpenAI",
             "Anthropic",
-            "DeepSeek",
+            "OpenAI",
+            "OpenRouter",
             "Google Gemini",
+            "DeepSeek",
             "xAI (Grok)",
-            "OpenRouter"
+            "NVIDIA"
     };
 
     private static final String[] PROVIDER_CODES = {
-            "nvidia",
-            "openai",
             "anthropic",
-            "deepseek",
+            "openai",
+            "openrouter",
             "gemini",
+            "deepseek",
             "xai",
-            "openrouter"
+            "nvidia"
     };
 
-    private static final String[] TAB_NAMES_EN = {"API", "Animations", "Language", "Theme", "Visual"};
-    private static final String[] TAB_NAMES_RU = {"API", "Анимации", "Язык", "Тема", "Визуал"};
+    private static final String[] TAB_NAMES_EN = {"Create", "API", "Animations", "Language", "Theme", "Visual"};
+    private static final String[] TAB_NAMES_RU = {"Создать", "API", "Анимации", "Язык", "Тема", "Визуал"};
 
     private static final String[] LANG_OPTIONS = {"English", "Русский"};
     private static final String[] LANG_CODES = {"en", "ru"};
 
-    private static final int TAB_API = 0;
-    private static final int TAB_ANIM = 1;
-    private static final int TAB_LANG = 2;
-    private static final int TAB_THEME = 3;
-    private static final int TAB_VISUAL = 4;
+    private static final int TAB_CREATE = 0;
+    private static final int TAB_API = 1;
+    private static final int TAB_ANIM = 2;
+    private static final int TAB_LANG = 3;
+    private static final int TAB_THEME = 4;
+    private static final int TAB_VISUAL = 5;
 
     private static final int SV_SIZE = 80;
     private static final int SV_CELLS = 20;
@@ -92,6 +94,14 @@ public class PromptCraftSettingsScreen extends Screen {
     private TextFieldWidget hexColorField;
     private TextFieldWidget modelSearchField;
 
+    // Create tab widgets
+    private EditBoxWidget promptField;
+    private FlatButton generateButton;
+    private FlatButton editButton;
+    private FlatButton undoButton;
+    private FlatButton backButton;
+    private FlatButton nextButton;
+
     private String provider;
     private Map<String, String> apiKeys;
     private String model;
@@ -102,7 +112,7 @@ public class PromptCraftSettingsScreen extends Screen {
     private float fillOpacity;
     private boolean outlineThroughBlocks;
 
-    private int selectedTab = TAB_API;
+    private int selectedTab = TAB_CREATE;
 
     private boolean providerMenuOpen = false;
     private boolean langMenuOpen = false;
@@ -161,6 +171,28 @@ public class PromptCraftSettingsScreen extends Screen {
         int contentX = centerX - 30;
         int contentY = menuY;
 
+        // --- CREATE TAB WIDGETS ---
+        // Use EditBoxWidget for multiline input. Height 45 pixels.
+        promptField = new net.minecraft.client.gui.widget.EditBoxWidget(this.textRenderer, contentX - 5, contentY, 190, 45, Text.literal("Prompt"), Text.literal(""));
+        this.addDrawableChild(promptField);
+
+        // Shift buttons below the larger prompt field (starting at contentY + 50)
+        generateButton = new FlatButton(contentX - 5, contentY + 50, 90, 20, Text.literal("Generate"), b -> sendGuiAction("generate", promptField.getText()));
+        this.addDrawableChild(generateButton);
+
+        editButton = new FlatButton(contentX + 95, contentY + 50, 90, 20, Text.literal("Edit"), b -> sendGuiAction("edit", promptField.getText()));
+        this.addDrawableChild(editButton);
+
+        undoButton = new FlatButton(contentX - 5, contentY + 75, 190, 20, Text.literal("Undo (Clear)"), b -> sendGuiAction("undo", ""));
+        this.addDrawableChild(undoButton);
+
+        backButton = new FlatButton(contentX - 5, contentY + 100, 90, 20, Text.literal("<< Back"), b -> sendGuiAction("back", ""));
+        this.addDrawableChild(backButton);
+
+        nextButton = new FlatButton(contentX + 95, contentY + 100, 90, 20, Text.literal("Next >>"), b -> sendGuiAction("next", ""));
+        this.addDrawableChild(nextButton);
+
+        // --- API TAB WIDGETS ---
         providerButton = new ProviderSelectButton(
                 contentX - 5,
                 contentY,
@@ -175,7 +207,7 @@ public class PromptCraftSettingsScreen extends Screen {
         apiKeyField.setMaxLength(300);
         apiKeyField.setText(apiKeys.getOrDefault(provider, ""));
         apiKeyField.setDrawsBackground(false);
-        apiKeyField.setChangedListener(text -> apiKeys.put(this.provider, text)); // Сохраняем ключ в словарь при каждом изменении
+        apiKeyField.setChangedListener(text -> apiKeys.put(this.provider, text));
         this.addDrawableChild(apiKeyField);
 
         modelButton = new ModelSelectButton(
@@ -191,6 +223,7 @@ public class PromptCraftSettingsScreen extends Screen {
         refreshButton = new IconButton(contentX + 160, contentY + 80, 22, 22, REFRESH_ICON, button -> fetchModels());
         this.addDrawableChild(refreshButton);
 
+        // --- ANIMATIONS TAB WIDGETS ---
         previewButton = new FlatButton(
                 contentX - 5,
                 contentY + 5,
@@ -204,6 +237,7 @@ public class PromptCraftSettingsScreen extends Screen {
         );
         this.addDrawableChild(previewButton);
 
+        // --- LANGUAGE TAB WIDGETS ---
         langButton = new FlatButton(
                 contentX - 5,
                 contentY + 30,
@@ -214,6 +248,7 @@ public class PromptCraftSettingsScreen extends Screen {
         );
         this.addDrawableChild(langButton);
 
+        // --- VISUAL TAB WIDGETS ---
         outlineButton = new FlatButton(
                 contentX - 5,
                 contentY + 5,
@@ -243,6 +278,7 @@ public class PromptCraftSettingsScreen extends Screen {
         opacitySlider = new OpacitySlider(contentX - 5, contentY + 85, 190, 20, fillOpacity);
         this.addDrawableChild(opacitySlider);
 
+        // --- THEME TAB WIDGETS ---
         hexColorField = new TextFieldWidget(this.textRenderer, contentX + 10, contentY + 95, 60, 16, Text.literal("Hex"));
         hexColorField.setMaxLength(7);
         hexColorField.setText(themeColor);
@@ -259,6 +295,7 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(hexColorField);
 
+        // --- SAVE BUTTON ---
         saveButton = new FlatButton(centerX - 60, centerY + 90, 120, 20, Text.literal(t("Save & Close", "Сохранить и закрыть")), button -> {
             PacketByteBuf buf = PacketByteBufs.create();
             buf.writeString(provider);
@@ -297,41 +334,42 @@ public class PromptCraftSettingsScreen extends Screen {
     }
 
     private void updateWidgetVisibility() {
+        boolean isCreate = selectedTab == TAB_CREATE;
         boolean isApi = selectedTab == TAB_API;
         boolean isAnim = selectedTab == TAB_ANIM;
         boolean isLang = selectedTab == TAB_LANG;
         boolean isTheme = selectedTab == TAB_THEME;
         boolean isVisual = selectedTab == TAB_VISUAL;
 
-        providerButton.visible = isApi;
-        providerButton.active = isApi;
+        if (promptField != null) { promptField.visible = isCreate; promptField.active = isCreate; }
+        if (generateButton != null) { generateButton.visible = isCreate; generateButton.active = isCreate; }
+        if (editButton != null) { editButton.visible = isCreate; editButton.active = isCreate; }
+        if (undoButton != null) { undoButton.visible = isCreate; undoButton.active = isCreate; }
+        if (backButton != null) { backButton.visible = isCreate; backButton.active = isCreate; }
+        if (nextButton != null) { nextButton.visible = isCreate; nextButton.active = isCreate; }
 
-        apiKeyField.visible = isApi;
-        apiKeyField.active = isApi;
+        if (providerButton != null) { providerButton.visible = isApi; providerButton.active = isApi; }
+        if (apiKeyField != null) { apiKeyField.visible = isApi; apiKeyField.active = isApi; }
+        if (modelButton != null) { modelButton.visible = isApi; modelButton.active = isApi; }
+        if (refreshButton != null) { refreshButton.visible = isApi; refreshButton.active = isApi; }
 
-        modelButton.visible = isApi;
-        modelButton.active = isApi;
+        if (previewButton != null) { previewButton.visible = isAnim; previewButton.active = isAnim; }
 
-        refreshButton.visible = isApi;
-        refreshButton.active = isApi;
+        if (langButton != null) { langButton.visible = isLang; langButton.active = isLang; }
 
-        previewButton.visible = isAnim;
-        previewButton.active = isAnim;
+        if (hexColorField != null) { hexColorField.visible = isTheme; hexColorField.active = isTheme; }
 
-        langButton.visible = isLang;
-        langButton.active = isLang;
+        if (outlineButton != null) { outlineButton.visible = isVisual; outlineButton.active = isVisual; }
+        if (outlineThroughBlocksButton != null) { outlineThroughBlocksButton.visible = isVisual; outlineThroughBlocksButton.active = isVisual; }
+        if (opacitySlider != null) { opacitySlider.visible = isVisual; opacitySlider.active = isVisual; }
+    }
 
-        hexColorField.visible = isTheme;
-        hexColorField.active = isTheme;
-
-        outlineButton.visible = isVisual;
-        outlineButton.active = isVisual;
-
-        outlineThroughBlocksButton.visible = isVisual;
-        outlineThroughBlocksButton.active = isVisual;
-
-        opacitySlider.visible = isVisual;
-        opacitySlider.active = isVisual;
+    private void sendGuiAction(String action, String prompt) {
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(action);
+        buf.writeString(prompt);
+        ClientPlayNetworking.send(PromptCraftNetworking.GUI_ACTION_PACKET, buf);
+        this.client.setScreen(null);
     }
 
     private void openModelList() {
@@ -470,12 +508,15 @@ public class PromptCraftSettingsScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (providerMenuOpen || langMenuOpen) {
+        if (providerMenuOpen || langMenuOpen) return true;
+
+        if (modelMenuOpen) {
+            modelSearchField.keyPressed(keyCode, scanCode, modifiers);
             return true;
         }
 
-        if (modelMenuOpen && modelSearchField.keyPressed(keyCode, scanCode, modifiers)) {
-            return true;
+        if (promptField != null && promptField.isFocused()) {
+            if (promptField.keyPressed(keyCode, scanCode, modifiers)) return true;
         }
 
         if (apiKeyField != null && apiKeyField.isFocused()) {
@@ -495,12 +536,15 @@ public class PromptCraftSettingsScreen extends Screen {
 
     @Override
     public boolean charTyped(char chr, int modifiers) {
-        if (providerMenuOpen || langMenuOpen) {
+        if (providerMenuOpen || langMenuOpen) return true;
+
+        if (modelMenuOpen) {
+            modelSearchField.charTyped(chr, modifiers);
             return true;
         }
 
-        if (modelMenuOpen && modelSearchField.charTyped(chr, modifiers)) {
-            return true;
+        if (promptField != null && promptField.isFocused()) {
+            return promptField.charTyped(chr, modifiers);
         }
 
         if (apiKeyField != null && apiKeyField.isFocused()) {
@@ -519,20 +563,20 @@ public class PromptCraftSettingsScreen extends Screen {
         int contentX = centerX - 30;
         int contentY = menuY;
 
-        if (providerMenuOpen) {
-            return handleProviderMenuClick(mouseX, mouseY);
+        // Снятие фокуса с поля промпта при клике мимо него
+        if (selectedTab == TAB_CREATE && promptField != null && promptField.visible) {
+            if (!promptField.isMouseOver(mouseX, mouseY)) {
+                promptField.setFocused(false);
+            }
         }
 
-        if (modelMenuOpen) {
-            return handleModelMenuClick(mouseX, mouseY, button);
-        }
+        if (providerMenuOpen) return handleProviderMenuClick(mouseX, mouseY);
+        if (modelMenuOpen) return handleModelMenuClick(mouseX, mouseY, button);
+        if (langMenuOpen) return handleLangMenuClick(mouseX, mouseY);
 
-        if (langMenuOpen) {
-            return handleLangMenuClick(mouseX, mouseY);
-        }
-
+        // ИСПРАВЛЕНИЕ: Цикл теперь идет до 6 (так как у нас 6 вкладок!)
         if (mouseX >= menuX && mouseX <= menuX + 120) {
-            for (int i = 0; i < 5; i++) {
+            for (int i = 0; i < 6; i++) {
                 int ty = menuY + i * 25;
                 if (mouseY >= ty && mouseY <= ty + 20) {
                     selectedTab = i;
@@ -753,11 +797,13 @@ public class PromptCraftSettingsScreen extends Screen {
 
         int themeColorInt = parseThemeColor(themeColor);
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 6; i++) {
             renderMenuItem(context, tabName(i), menuX, menuY + i * 25, selectedTab == i, themeColorInt);
         }
 
-        if (selectedTab == TAB_API) {
+        if (selectedTab == TAB_CREATE) {
+            // No label needed — the EditBoxWidget sits at the top of the tab
+        } else if (selectedTab == TAB_API) {
             context.drawTextWithShadow(this.textRenderer, t("Provider:", "Провайдер:"), contentX - 5, contentY - 12, 0xFFFFFF);
             context.drawTextWithShadow(this.textRenderer, "API Key:", contentX - 5, contentY + 26, 0xFFFFFF);
             context.drawTextWithShadow(this.textRenderer, "Model:", contentX - 5, contentY + 68, 0xFFFFFF);
@@ -880,7 +926,7 @@ public class PromptCraftSettingsScreen extends Screen {
             boolean hovered = mouseX >= ox + 10 && mouseX <= ox + overlayW - 15 && mouseY >= itemY && mouseY <= itemY + itemH;
 
             context.fill(ox + 10, itemY, ox + overlayW - 15, itemY + itemH, hovered ? themeColorInt : 0xFF2D2D2D);
-            context.drawTextWithShadow(this.textRenderer, modelId, ox + 15, itemY + 4, hovered ? 0x000000 : 0xD2D2D2);
+            context.drawTextWithShadow(this.textRenderer, modelId, ox + 15, itemY + 4, hovered ? 0xFFFFFF : 0xD2D2D2);
         }
 
         int maxScroll = Math.max(0, filteredModels.size() - visibleCount);
@@ -941,6 +987,17 @@ public class PromptCraftSettingsScreen extends Screen {
         int previewX = hueX + HUE_W + 12;
         int previewY = hueY;
         context.fill(previewX, previewY, previewX + PREVIEW_SIZE, previewY + PREVIEW_SIZE, parseThemeColor(themeColor));
+
+        // --- БЕЛЫЕ УКАЗАТЕЛИ ---
+        // 1. Точка на палитре SV
+        int dotX = svX + (int) (pickerSat * SV_SIZE);
+        int dotY = svY + (int) ((1f - pickerVal) * SV_SIZE);
+        context.fill(dotX - 1, dotY - 1, dotX + 2, dotY + 2, 0xFFFFFFFF);
+        context.fill(dotX, dotY, dotX + 1, dotY + 1, 0xFF000000); // Черный центр для контраста
+
+        // 2. Полоска на ползунке Hue
+        int hY = hueY + (int) (pickerHue * HUE_H);
+        context.fill(hueX - 2, hY - 1, hueX + HUE_W + 2, hY + 2, 0xFFFFFFFF);
     }
 
     private void renderMenuItem(DrawContext context, String text, int x, int y, boolean selected, int themeColor) {
@@ -1018,10 +1075,8 @@ public class PromptCraftSettingsScreen extends Screen {
             return t("Select model", "Выбрать модель");
         }
 
-        // Высчитываем доступное место: 160 (ширина кнопки) - 7 (отступ слева) - 20 (место под стрелочку) = 133
         int maxWidth = 130; 
         
-        // Если текст в пикселях шире, чем доступное место, обрезаем его и добавляем троеточие
         if (this.textRenderer.getWidth(value) > maxWidth) {
             int availableWidth = maxWidth - this.textRenderer.getWidth("...");
             return this.textRenderer.trimToWidth(value, availableWidth) + "...";

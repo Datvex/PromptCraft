@@ -40,13 +40,9 @@ public class HistoryManager {
 
         toStackMap.computeIfAbsent(player.getUuid(), k -> new ArrayDeque<>()).push(oppositeSnapshots);
 
-        for (BlockSnapshot snap : snapshots) {
-            world.setBlockState(snap.pos(), snap.state(), 3);
-            if (snap.nbt() != null) {
-                BlockEntity be = world.getBlockEntity(snap.pos());
-                if (be != null) be.readNbt(snap.nbt());
-            }
-        }
+        // Восстановление идет плавно и со звуком через RestoreTask
+        dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.RestoreTask(player, snapshots, null));
+
         return true;
     }
 }
