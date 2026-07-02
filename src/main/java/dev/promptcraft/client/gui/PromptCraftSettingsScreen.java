@@ -9,8 +9,10 @@ import dev.promptcraft.network.PromptCraftNetworking;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.Element;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.client.gui.widget.SliderWidget;
 import net.minecraft.client.gui.widget.EditBoxWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
@@ -605,7 +607,19 @@ public class PromptCraftSettingsScreen extends Screen {
             }
         }
 
-        return super.mouseClicked(mouseX, mouseY, button);
+        for (Element child : this.children()) {
+            if (child instanceof ClickableWidget widget && (!widget.visible || !widget.active)) {
+                continue;
+            }
+            if (child.mouseClicked(mouseX, mouseY, button)) {
+                this.setFocused(child);
+                if (button == 0) {
+                    this.setDragging(true);
+                }
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean handleProviderMenuClick(double mouseX, double mouseY) {
