@@ -39,7 +39,14 @@ public class PromptCraftNetworking {
             float fillOpacity = buf.readFloat();
             boolean outlineThroughBlocks = buf.readBoolean();
 
+            boolean selectionLimitEnabled = buf.readBoolean();
+            int maxSelectionWidth = buf.readInt();
+            int maxSelectionHeight = buf.readInt();
+            int maxSelectionDepth = buf.readInt();
+
             server.execute(() -> {
+                if (!dev.promptcraft.PromptCraftCommands.hasAccess(player)) return;
+
                 PromptCraftEnv.saveApiKeys(apiKeys);
                 PromptCraftConfig config = PromptCraftConfigManager.get();
                 config.provider = provider;
@@ -50,6 +57,12 @@ public class PromptCraftNetworking {
                 config.thickSelectionOutline = thickOutline;
                 config.selectionFillOpacity = Math.max(0.0f, Math.min(1.0f, fillOpacity));
                 config.selectionOutlineThroughBlocks = outlineThroughBlocks;
+
+                config.selectionLimitEnabled = selectionLimitEnabled;
+                config.maxSelectionWidth = Math.max(1, maxSelectionWidth);
+                config.maxSelectionHeight = Math.max(1, maxSelectionHeight);
+                config.maxSelectionDepth = Math.max(1, maxSelectionDepth);
+
                 PromptCraftConfigManager.save();
             });
         });
@@ -141,6 +154,11 @@ public class PromptCraftNetworking {
         buf.writeBoolean(config.thickSelectionOutline);
         buf.writeFloat(config.selectionFillOpacity);
         buf.writeBoolean(config.selectionOutlineThroughBlocks);
+
+        buf.writeBoolean(config.selectionLimitEnabled);
+        buf.writeInt(config.maxSelectionWidth);
+        buf.writeInt(config.maxSelectionHeight);
+        buf.writeInt(config.maxSelectionDepth);
 
         ServerPlayNetworking.send(player, OPEN_GUI_PACKET, buf);
     }

@@ -63,18 +63,27 @@ public class PromptCraftClient implements ClientModInitializer {
             boolean thickOutline = buf.readBoolean();
             float fillOpacity = buf.readFloat();
             boolean outlineThroughBlocks = buf.readBoolean();
-            
+
+            boolean selectionLimitEnabled = buf.readBoolean();
+            int maxSelectionWidth = buf.readInt();
+            int maxSelectionHeight = buf.readInt();
+            int maxSelectionDepth = buf.readInt();
+
             client.execute(() -> client.setScreen(
                     new PromptCraftSettingsScreen(
                             provider,
-                            apiKeys, // Передаем словарь вместо одной строки
+                            apiKeys,
                             model,
                             showPreview,
                             language,
                             themeColor,
                             thickOutline,
                             fillOpacity,
-                            outlineThroughBlocks
+                            outlineThroughBlocks,
+                            selectionLimitEnabled,
+                            maxSelectionWidth,
+                            maxSelectionHeight,
+                            maxSelectionDepth
                     )
             ));
         });        WorldRenderEvents.LAST.register(context -> {
