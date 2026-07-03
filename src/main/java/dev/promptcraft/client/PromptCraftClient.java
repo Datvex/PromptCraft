@@ -69,6 +69,9 @@ public class PromptCraftClient implements ClientModInitializer {
             int maxSelectionHeight = buf.readInt();
             int maxSelectionDepth = buf.readInt();
 
+            boolean reasoningLimitEnabled = buf.readBoolean();
+            int reasoningTokenLimit = buf.readInt();
+
             client.execute(() -> client.setScreen(
                     new PromptCraftSettingsScreen(
                             provider,
@@ -83,7 +86,9 @@ public class PromptCraftClient implements ClientModInitializer {
                             selectionLimitEnabled,
                             maxSelectionWidth,
                             maxSelectionHeight,
-                            maxSelectionDepth
+                            maxSelectionDepth,
+                            reasoningLimitEnabled,
+                            reasoningTokenLimit
                     )
             ));
         });        WorldRenderEvents.LAST.register(context -> {

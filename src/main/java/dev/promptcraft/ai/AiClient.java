@@ -22,9 +22,11 @@ public class AiClient {
     private static final Gson GSON = new Gson();
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(45)).build();
 
+    private static final int ANSWER_RESERVE_TOKENS = 8192;
+
     public static CompletableFuture<PromptCraftStructure> requestBuild(ServerPlayerEntity player, String prompt, int width, int height, int depth) {
         PromptCraftConfig config = PromptCraftConfigManager.get();
-        String apiKey = PromptCraftEnv.getApiKey(config.provider); // Получаем ключ ИМЕННО для текущего провайдера
+        String apiKey = PromptCraftEnv.getApiKey(config.provider);
 
         if (apiKey == null || apiKey.isEmpty()) {
             player.sendMessage(Text.literal("API Key is missing! Please use /psettings").formatted(Formatting.RED), false);
@@ -48,10 +50,9 @@ public class AiClient {
                     try {
                         JsonObject root = GSON.fromJson(response.body(), JsonObject.class);
                         String content = extractContent(config.provider, root);
-                        
-                        // Очистка от маркдауна, если ИИ всё же его добавил
+
                         content = content.replace("```json", "").replace("```", "").trim();
-                        
+
                         return GSON.fromJson(content, PromptCraftStructure.class);
                     } catch (Exception e) {
                         player.sendMessage(Text.literal("Failed to parse AI response: " + e.getMessage()).formatted(Formatting.RED), false);
@@ -65,16 +66,32 @@ public class AiClient {
         String url;
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().header("Content-Type", "application/json");
 
+        boolean reasoningEnabled = "anthropic".equals(config.provider) && config.reasoningLimitEnabled;
+        int reasoningBudget = Math.max(1, config.reasoningTokenLimit);
+
         switch (config.provider) {
             case "anthropic":
                 url = "https://api.anthropic.com/v1/messages";
                 requestBuilder.header("x-api-key", apiKey).header("anthropic-version", "2023-06-01");
-                
+
                 payload.addProperty("model", config.model);
-                payload.addProperty("max_tokens", 4096);
-                payload.addProperty("temperature", 0.3);
                 payload.addProperty("system", systemPrompt);
-                
+
+                int anthropicMaxTokens = 4096;
+
+                if (reasoningEnabled) {
+                    anthropicMaxTokens = Math.max(anthropicMaxTokens, reasoningBudget + ANSWER_RESERVE_TOKENS);
+
+                    JsonObject thinking = new JsonObject();
+                    thinking.addProperty("type", "enabled");
+                    thinking.addProperty("budget_tokens", reasoningBudget);
+                    payload.add("thinking", thinking);
+                } else {
+                    payload.addProperty("temperature", 0.3);
+                }
+
+                payload.addProperty("max_tokens", anthropicMaxTokens);
+
                 JsonObject anthropicMsg = new JsonObject();
                 anthropicMsg.addProperty("role", "user");
                 anthropicMsg.addProperty("content", userPrompt);
@@ -101,7 +118,7 @@ public class AiClient {
                 payload.add("generationConfig", genConfig);
                 break;
 
-            default: // OpenAI-совместимые (NVIDIA, OpenAI, DeepSeek, OpenRouter, xAI)
+            default:
                 url = switch (config.provider) {
                     case "openai" -> "https://api.openai.com/v1/chat/completions";
                     case "deepseek" -> "https://api.deepseek.com/chat/completions";
@@ -109,10 +126,9 @@ public class AiClient {
                     case "xai" -> "https://api.x.ai/v1/chat/completions";
                     default -> "https://integrate.api.nvidia.com/v1/chat/completions";
                 };
-                
+
                 requestBuilder.header("Authorization", "Bearer " + apiKey);
-                
-                // Для OpenRouter полезно передавать заголовки приложения
+
                 if (config.provider.equals("openrouter")) {
                     requestBuilder.header("HTTP-Referer", "https://github.com/PromptCraft");
                     requestBuilder.header("X-OpenRouter-Title", "PromptCraft Mod");
@@ -142,7 +158,6 @@ public class AiClient {
             return root.getAsJsonArray("candidates").get(0).getAsJsonObject()
                     .getAsJsonObject("content").getAsJsonArray("parts").get(0).getAsJsonObject().get("text").getAsString();
         } else {
-            // OpenAI-совместимый ответ
             return root.getAsJsonArray("choices").get(0).getAsJsonObject()
                     .getAsJsonObject("message").get("content").getAsString();
         }

@@ -22,6 +22,9 @@ public class PromptCraftConfig {
     public int maxSelectionDepth = 64;
     public int maxRepairAttempts = 3;
 
+    public boolean reasoningLimitEnabled = false;
+    public int reasoningTokenLimit = 2048;
+
     public boolean isAccessEveryone() {
         return "everyone".equalsIgnoreCase(accessMode);
     }

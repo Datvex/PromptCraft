@@ -85,6 +85,7 @@ public class PromptCraftSettingsScreen extends Screen {
     private static final int PREVIEW_SIZE = 20;
 
     private static final long SAVE_DEBOUNCE_MS = 500L;
+    private static final int MAX_REASONING_TOKENS = 32000;
 
     private ProviderSelectButton providerButton;
     private PasswordFieldWidget apiKeyField;
@@ -111,6 +112,11 @@ public class PromptCraftSettingsScreen extends Screen {
     private TextFieldWidget maxHeightField;
     private TextFieldWidget maxDepthField;
 
+    private FlatButton reasoningLimitButton;
+    private ReasoningSlider reasoningSlider;
+    private TextFieldWidget reasoningTokenField;
+    private boolean updatingReasoningWidgets = false;
+
     private String provider;
     private Map<String, String> apiKeys;
     private String model;
@@ -125,6 +131,9 @@ public class PromptCraftSettingsScreen extends Screen {
     private int maxSelectionWidth;
     private int maxSelectionHeight;
     private int maxSelectionDepth;
+
+    private boolean reasoningLimitEnabled;
+    private int reasoningTokenLimit;
 
     private int selectedTab = TAB_CREATE;
 
@@ -161,7 +170,9 @@ public class PromptCraftSettingsScreen extends Screen {
             boolean selectionLimitEnabled,
             int maxSelectionWidth,
             int maxSelectionHeight,
-            int maxSelectionDepth
+            int maxSelectionDepth,
+            boolean reasoningLimitEnabled,
+            int reasoningTokenLimit
     ) {
         super(Text.literal("PromptCraft Settings"));
         this.provider = provider != null && !provider.isBlank() ? provider : "nvidia";
@@ -179,6 +190,9 @@ public class PromptCraftSettingsScreen extends Screen {
         this.maxSelectionHeight = Math.max(1, maxSelectionHeight);
         this.maxSelectionDepth = Math.max(1, maxSelectionDepth);
 
+        this.reasoningLimitEnabled = reasoningLimitEnabled;
+        this.reasoningTokenLimit = Math.max(0, Math.min(MAX_REASONING_TOKENS, reasoningTokenLimit));
+
         hexToHsv(this.themeColor);
     }
 
@@ -188,6 +202,10 @@ public class PromptCraftSettingsScreen extends Screen {
 
     private String tabName(int index) {
         return ("ru".equals(language) ? TAB_NAMES_RU : TAB_NAMES_EN)[index];
+    }
+
+    private boolean isClaudeProvider() {
+        return "anthropic".equals(provider);
     }
 
     @Override
@@ -321,9 +339,52 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(hexColorField);
 
+        // --- LIMITS TAB WIDGETS ---
+
+        // Reasoning token limit
+        reasoningLimitButton = new FlatButton(
+                contentX - 5,
+                contentY + 12,
+                190,
+                20,
+                Text.literal(getReasoningLimitButtonText()),
+                button -> {
+                    reasoningLimitEnabled = !reasoningLimitEnabled;
+                    button.setMessage(Text.literal(getReasoningLimitButtonText()));
+                    markDirty();
+                    updateWidgetVisibility();
+                }
+        );
+        this.addDrawableChild(reasoningLimitButton);
+
+        reasoningSlider = new ReasoningSlider(contentX - 5, contentY + 40, 130, 16, reasoningTokenLimit);
+        this.addDrawableChild(reasoningSlider);
+
+        reasoningTokenField = new TextFieldWidget(this.textRenderer, contentX + 130, contentY + 42, 55, 12, Text.literal("Tokens"));
+        reasoningTokenField.setMaxLength(6);
+        reasoningTokenField.setText(String.valueOf(reasoningTokenLimit));
+        reasoningTokenField.setTextPredicate(s -> s.isEmpty() || s.matches("\\d{1,6}"));
+        reasoningTokenField.setChangedListener(text -> {
+            if (updatingReasoningWidgets) return;
+            int val;
+            try {
+                val = text.isEmpty() ? 0 : Integer.parseInt(text);
+            } catch (Exception ignored) {
+                return;
+            }
+            val = Math.max(0, Math.min(MAX_REASONING_TOKENS, val));
+            reasoningTokenLimit = val;
+            updatingReasoningWidgets = true;
+            reasoningSlider.setValueFromExternal(val);
+            updatingReasoningWidgets = false;
+            markDirty();
+        });
+        this.addDrawableChild(reasoningTokenField);
+
+        // Build area limit
         limitEnabledButton = new FlatButton(
                 contentX - 5,
-                contentY + 40,
+                contentY + 78,
                 190,
                 20,
                 Text.literal(getLimitEnabledText()),
@@ -336,7 +397,7 @@ public class PromptCraftSettingsScreen extends Screen {
         );
         this.addDrawableChild(limitEnabledButton);
 
-        maxWidthField = new TextFieldWidget(this.textRenderer, contentX + 12, contentY + 80, 45, 16, Text.literal("W"));
+        maxWidthField = new TextFieldWidget(this.textRenderer, contentX + 12, contentY + 120, 45, 16, Text.literal("W"));
         maxWidthField.setMaxLength(5);
         maxWidthField.setText(String.valueOf(maxSelectionWidth));
         maxWidthField.setTextPredicate(s -> s.isEmpty() || s.matches("\\d{1,5}"));
@@ -349,7 +410,7 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(maxWidthField);
 
-        maxHeightField = new TextFieldWidget(this.textRenderer, contentX + 85, contentY + 80, 45, 16, Text.literal("H"));
+        maxHeightField = new TextFieldWidget(this.textRenderer, contentX + 85, contentY + 120, 45, 16, Text.literal("H"));
         maxHeightField.setMaxLength(5);
         maxHeightField.setText(String.valueOf(maxSelectionHeight));
         maxHeightField.setTextPredicate(s -> s.isEmpty() || s.matches("\\d{1,5}"));
@@ -362,7 +423,7 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(maxHeightField);
 
-        maxDepthField = new TextFieldWidget(this.textRenderer, contentX + 158, contentY + 80, 45, 16, Text.literal("D"));
+        maxDepthField = new TextFieldWidget(this.textRenderer, contentX + 158, contentY + 120, 45, 16, Text.literal("D"));
         maxDepthField.setMaxLength(5);
         maxDepthField.setText(String.valueOf(maxSelectionDepth));
         maxDepthField.setTextPredicate(s -> s.isEmpty() || s.matches("\\d{1,5}"));
@@ -396,6 +457,7 @@ public class PromptCraftSettingsScreen extends Screen {
         boolean isTheme = selectedTab == TAB_THEME;
         boolean isVisual = selectedTab == TAB_VISUAL;
         boolean isLimits = selectedTab == TAB_LIMITS;
+        boolean isClaude = isClaudeProvider();
 
         if (promptField != null) { promptField.visible = isCreate; promptField.active = isCreate; }
         if (generateButton != null) { generateButton.visible = isCreate; generateButton.active = isCreate; }
@@ -418,6 +480,11 @@ public class PromptCraftSettingsScreen extends Screen {
         if (outlineButton != null) { outlineButton.visible = isVisual; outlineButton.active = isVisual; }
         if (outlineThroughBlocksButton != null) { outlineThroughBlocksButton.visible = isVisual; outlineThroughBlocksButton.active = isVisual; }
         if (opacitySlider != null) { opacitySlider.visible = isVisual; opacitySlider.active = isVisual; }
+
+        if (reasoningLimitButton != null) { reasoningLimitButton.visible = isLimits; reasoningLimitButton.active = isLimits && isClaude; }
+        boolean reasoningFieldsActive = isLimits && isClaude && reasoningLimitEnabled;
+        if (reasoningSlider != null) { reasoningSlider.visible = isLimits; reasoningSlider.active = reasoningFieldsActive; }
+        if (reasoningTokenField != null) { reasoningTokenField.visible = isLimits; reasoningTokenField.active = reasoningFieldsActive; reasoningTokenField.setEditable(isClaude && reasoningLimitEnabled); }
 
         if (limitEnabledButton != null) { limitEnabledButton.visible = isLimits; limitEnabledButton.active = isLimits; }
         boolean limitFieldsActive = isLimits && selectionLimitEnabled;
@@ -483,6 +550,9 @@ public class PromptCraftSettingsScreen extends Screen {
         buf.writeInt(maxSelectionWidth);
         buf.writeInt(maxSelectionHeight);
         buf.writeInt(maxSelectionDepth);
+
+        buf.writeBoolean(reasoningLimitEnabled);
+        buf.writeInt(reasoningTokenLimit);
 
         ClientPlayNetworking.send(PromptCraftNetworking.SAVE_GUI_PACKET, buf);
         pendingSave = false;
@@ -754,23 +824,28 @@ public class PromptCraftSettingsScreen extends Screen {
             return true;
         }
 
-        for (int i = 0; i < PROVIDER_OPTIONS.length; i++) {
-            int itemY = oy + 30 + i * 22;
-            if (mouseX >= ox + 10 && mouseX <= ox + overlayW - 10 && mouseY >= itemY && mouseY <= itemY + 20) {
-                provider = PROVIDER_CODES[i];
-                providerButton.setMessage(Text.literal(getProviderDisplayName(provider)));
-                providerMenuOpen = false;
+            for (int i = 0; i < PROVIDER_OPTIONS.length; i++) {
+                int itemY = oy + 30 + i * 22;
+                if (mouseX >= ox + 10 && mouseX <= ox + overlayW - 10 && mouseY >= itemY && mouseY <= itemY + 20) {
+                    provider = PROVIDER_CODES[i];
+                    providerButton.setMessage(Text.literal(getProviderDisplayName(provider)));
+                    providerMenuOpen = false;
 
-                fetchedModels.clear();
-                filteredModels.clear();
-                model = getDefaultModelForProvider(provider);
-                modelButton.setMessage(Text.literal(shortenModelName(model)));
-                apiKeyField.setText(apiKeys.getOrDefault(provider, ""));
+                    fetchedModels.clear();
+                    filteredModels.clear();
+                    model = getDefaultModelForProvider(provider);
+                    modelButton.setMessage(Text.literal(shortenModelName(model)));
+                    apiKeyField.setText(apiKeys.getOrDefault(provider, ""));
 
-                markDirty();
-                return true;
+                    if (reasoningLimitButton != null) {
+                        reasoningLimitButton.setMessage(Text.literal(getReasoningLimitButtonText()));
+                    }
+                    updateWidgetVisibility();
+
+                    markDirty();
+                    return true;
+                }
             }
-        }
 
         if (mouseX < ox || mouseX > ox + overlayW || mouseY < oy || mouseY > oy + overlayH) {
             providerMenuOpen = false;
@@ -805,6 +880,7 @@ public class PromptCraftSettingsScreen extends Screen {
                 outlineThroughBlocksButton.setMessage(Text.literal(getOutlineThroughBlocksButtonText()));
                 opacitySlider.updateMessage();
                 limitEnabledButton.setMessage(Text.literal(getLimitEnabledText()));
+                reasoningLimitButton.setMessage(Text.literal(getReasoningLimitButtonText()));
 
                 markDirty();
                 return true;
@@ -961,17 +1037,19 @@ public class PromptCraftSettingsScreen extends Screen {
             context.drawTextWithShadow(this.textRenderer, t("Through blocks:", "Сквозь блоки:"), contentX - 5, contentY + 30, 0xFFFFFF);
             context.drawTextWithShadow(this.textRenderer, t("Fill opacity:", "Прозрачность заливки:"), contentX - 5, contentY + 70, 0xFFFFFF);
         } else if (selectedTab == TAB_LIMITS) {
-            context.drawTextWithShadow(this.textRenderer, t("Token Limit (soon):", "Лимит токенов (скоро):"), contentX - 5, contentY - 12, 0xFFFFFF);
-            context.fill(contentX - 5, contentY, contentX + 185, contentY + 16, 0xFF232323);
-            context.drawTextWithShadow(this.textRenderer, t("Not available yet", "Пока недоступно"), contentX, contentY + 4, 0x707070);
+            boolean claude = isClaudeProvider();
+            int reasoningLabelColor = claude ? 0xFFFFFF : 0x6E6E6E;
 
-            context.drawTextWithShadow(this.textRenderer, t("Build Area Limit:", "Лимит области постройки:"), contentX - 5, contentY + 26, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, t("Reasoning Token Limit:", "Лимит токенов рассуждений:"), contentX - 5, contentY - 14, reasoningLabelColor);
+            context.drawTextWithShadow(this.textRenderer, t("(Anthropic Claude models only)", "(только для моделей Anthropic Claude)"), contentX - 5, contentY - 3, 0x707070);
+
+            context.drawTextWithShadow(this.textRenderer, t("Build Area Limit:", "Лимит области постройки:"), contentX - 5, contentY + 64, 0xFFFFFF);
 
             int labelColor = selectionLimitEnabled ? 0xFFFFFF : 0x6E6E6E;
-            context.drawTextWithShadow(this.textRenderer, t("Max Size (W / H / D):", "Макс. размер (Ш / В / Г):"), contentX - 5, contentY + 68, labelColor);
-            context.drawTextWithShadow(this.textRenderer, "W:", contentX - 5, contentY + 83, labelColor);
-            context.drawTextWithShadow(this.textRenderer, "H:", contentX + 68, contentY + 83, labelColor);
-            context.drawTextWithShadow(this.textRenderer, "D:", contentX + 141, contentY + 83, labelColor);
+            context.drawTextWithShadow(this.textRenderer, t("Max Size:", "Макс. размер:"), contentX - 5, contentY + 106, labelColor);
+            context.drawTextWithShadow(this.textRenderer, "W:", contentX - 5, contentY + 123, labelColor);
+            context.drawTextWithShadow(this.textRenderer, "H:", contentX + 68, contentY + 123, labelColor);
+            context.drawTextWithShadow(this.textRenderer, "D:", contentX + 141, contentY + 123, labelColor);
         }
 
         super.render(context, mouseX, mouseY, delta);
@@ -1242,6 +1320,13 @@ public class PromptCraftSettingsScreen extends Screen {
         return t("Area Limit: ", "Лимит области: ") + (selectionLimitEnabled ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"));
     }
 
+    private String getReasoningLimitButtonText() {
+        if (!isClaudeProvider()) {
+            return t("Reasoning Limit (Claude only)", "Лимит рассуждений (только Claude)");
+        }
+        return t("Reasoning Limit: ", "Лимит рассуждений: ") + (reasoningLimitEnabled ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"));
+    }
+
     private int parseThemeColor(String hex) {
         try {
             return 0xFF000000 | Integer.parseInt(hex.replace("#", ""), 16);
@@ -1388,8 +1473,9 @@ public class PromptCraftSettingsScreen extends Screen {
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             if (!this.visible) return;
 
-            int bgColor = this.isHovered() ? 0xFF3D3D3D : 0xFF2D2D2D;
-            int textColor = this.isHovered() ? 0xFFFFFF : 0xD2D2D2;
+            boolean enabled = this.active;
+            int bgColor = !enabled ? 0xFF232323 : (this.isHovered() ? 0xFF3D3D3D : 0xFF2D2D2D);
+            int textColor = !enabled ? 0xFF5A5A5A : (this.isHovered() ? 0xFFFFFF : 0xD2D2D2);
 
             context.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height, bgColor);
 
@@ -1457,6 +1543,50 @@ public class PromptCraftSettingsScreen extends Screen {
                 int cursorX = this.getX() + PromptCraftSettingsScreen.this.textRenderer.getWidth(shown);
                 context.fill(cursorX + 1, this.getY(), cursorX + 2, this.getY() + 11, 0xFFFFFFFF);
             }
+        }
+    }
+
+    private class ReasoningSlider extends SliderWidget {
+        public ReasoningSlider(int x, int y, int width, int height, int initialTokens) {
+            super(x, y, width, height, Text.empty(), Math.max(0.0D, Math.min(1.0D, initialTokens / (double) MAX_REASONING_TOKENS)));
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            this.setMessage(Text.empty());
+        }
+
+        @Override
+        protected void applyValue() {
+            int tokens = (int) Math.round(this.value * MAX_REASONING_TOKENS);
+            reasoningTokenLimit = tokens;
+
+            if (!updatingReasoningWidgets && reasoningTokenField != null) {
+                updatingReasoningWidgets = true;
+                reasoningTokenField.setText(String.valueOf(tokens));
+                updatingReasoningWidgets = false;
+            }
+
+            markDirty();
+        }
+
+        public void setValueFromExternal(int tokens) {
+            this.value = Math.max(0.0D, Math.min(1.0D, tokens / (double) MAX_REASONING_TOKENS));
+            updateMessage();
+        }
+
+        @Override
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            if (!this.visible) return;
+
+            int bgColor = this.isHovered() ? 0xFF3D3D3D : 0xFF2D2D2D;
+            int themeColorInt = this.active ? parseThemeColor(themeColor) : 0xFF4A4A4A;
+
+            context.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height, bgColor);
+
+            int fillW = (int) (this.width * this.value);
+            context.fill(this.getX(), this.getY(), this.getX() + fillW, this.getY() + this.height, themeColorInt);
         }
     }
 
