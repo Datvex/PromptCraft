@@ -32,7 +32,7 @@ public class RestoreTask implements Task {
             BlockPos pos = snap.pos();
             BlockState state = snap.state();
 
-            world.setBlockState(pos, state, 3);
+            world.setBlockState(pos, state, BlockPlacementUtil.flagsFor(state));
             if (snap.nbt() != null) {
                 BlockEntity be = world.getBlockEntity(pos);
                 if (be != null) be.readNbt(snap.nbt());

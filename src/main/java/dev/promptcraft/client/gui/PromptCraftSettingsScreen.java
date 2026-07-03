@@ -17,6 +17,7 @@ import net.minecraft.client.gui.widget.SliderWidget;
 import net.minecraft.client.gui.widget.EditBoxWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.network.PacketByteBuf;
+import net.minecraft.text.OrderedText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
@@ -157,6 +158,9 @@ public class PromptCraftSettingsScreen extends Screen {
     private boolean pendingSave = false;
     private long lastChangeTime = 0L;
 
+    private long cachedReasoningVersion = -1L;
+    private List<OrderedText> cachedReasoningLines = new ArrayList<>();
+
     public PromptCraftSettingsScreen(
             String provider,
             Map<String, String> apiKeys,
@@ -196,6 +200,11 @@ public class PromptCraftSettingsScreen extends Screen {
         hexToHsv(this.themeColor);
     }
 
+    @Override
+    public boolean shouldPause() {
+        return false;
+    }
+
     private String t(String en, String ru) {
         return "ru".equals(language) ? ru : en;
     }
@@ -212,17 +221,17 @@ public class PromptCraftSettingsScreen extends Screen {
     protected void init() {
         int centerX = this.width / 2;
         int centerY = this.height / 2;
-        int menuY = centerY - 60;
+        int menuY = centerY - 75;
         int contentX = centerX - 30;
         int contentY = menuY;
 
         promptField = new net.minecraft.client.gui.widget.EditBoxWidget(this.textRenderer, contentX - 5, contentY, 190, 45, Text.literal("Prompt"), Text.literal(""));
         this.addDrawableChild(promptField);
 
-        generateButton = new FlatButton(contentX - 5, contentY + 50, 90, 20, Text.literal("Generate"), b -> sendGuiAction("generate", promptField.getText()));
+        generateButton = new FlatButton(contentX - 5, contentY + 50, 90, 20, Text.literal("Generate"), b -> sendGuiActionKeepOpen("generate", promptField.getText()));
         this.addDrawableChild(generateButton);
 
-        editButton = new FlatButton(contentX + 95, contentY + 50, 90, 20, Text.literal("Edit"), b -> sendGuiAction("edit", promptField.getText()));
+        editButton = new FlatButton(contentX + 95, contentY + 50, 90, 20, Text.literal("Edit"), b -> sendGuiActionKeepOpen("edit", promptField.getText()));
         this.addDrawableChild(editButton);
 
         undoButton = new FlatButton(contentX - 5, contentY + 75, 190, 20, Text.literal("Undo (Clear)"), b -> sendGuiAction("undo", ""));
@@ -501,6 +510,14 @@ public class PromptCraftSettingsScreen extends Screen {
         this.client.setScreen(null);
     }
 
+    private void sendGuiActionKeepOpen(String action, String prompt) {
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeString(action);
+        buf.writeString(prompt);
+        ClientPlayNetworking.send(PromptCraftNetworking.GUI_ACTION_PACKET, buf);
+        dev.promptcraft.client.AiStreamState.reset();
+    }
+
     private void markDirty() {
         pendingSave = true;
         lastChangeTime = System.currentTimeMillis();
@@ -511,6 +528,23 @@ public class PromptCraftSettingsScreen extends Screen {
         super.tick();
         if (pendingSave && System.currentTimeMillis() - lastChangeTime >= SAVE_DEBOUNCE_MS) {
             flushSave();
+        }
+
+        boolean generating = dev.promptcraft.client.AiStreamState.isGenerating();
+        boolean createActive = selectedTab == TAB_CREATE;
+
+        if (generateButton != null) generateButton.active = createActive && !generating;
+        if (editButton != null) editButton.active = createActive && !generating;
+        if (promptField != null) promptField.active = createActive && !generating;
+        if (backButton != null) backButton.active = createActive && !generating;
+        if (nextButton != null) nextButton.active = createActive && !generating;
+
+        if (undoButton != null) {
+            undoButton.active = createActive;
+            String label = generating ? t("Cancel Generation", "Отменить генерацию") : t("Undo (Clear)", "Отменить (Очистить)");
+            if (!label.equals(undoButton.getMessage().getString())) {
+                undoButton.setMessage(Text.literal(label));
+            }
         }
     }
 
@@ -751,7 +785,7 @@ public class PromptCraftSettingsScreen extends Screen {
         int centerX = this.width / 2;
         int centerY = this.height / 2;
         int menuX = centerX - 180;
-        int menuY = centerY - 60;
+        int menuY = centerY - 75;
         int contentX = centerX - 30;
         int contentY = menuY;
 
@@ -975,7 +1009,7 @@ public class PromptCraftSettingsScreen extends Screen {
 
         if (selectedTab == TAB_THEME) {
             int contentX = this.width / 2 - 30;
-            int contentY = this.height / 2 - 60;
+            int contentY = this.height / 2 - 75;
 
             if (draggingSV) {
                 updateSV(mouseX, mouseY, contentX, contentY + 5);
@@ -998,13 +1032,13 @@ public class PromptCraftSettingsScreen extends Screen {
         int centerX = this.width / 2;
         int centerY = this.height / 2;
         int menuX = centerX - 180;
-        int menuY = centerY - 60;
+        int menuY = centerY - 75;
         int contentX = centerX - 30;
         int contentY = menuY;
 
-        context.fill(centerX - 200, centerY - 100, centerX + 200, centerY + 120, 0xFF1E1E1E);
-        context.drawTextWithShadow(this.textRenderer, t("Settings", "Настройки"), menuX, centerY - 85, 0xFFFFFF);
-        context.drawTextWithShadow(this.textRenderer, "esc", centerX + 170, centerY - 85, 0x6E6E6E);
+        context.fill(centerX - 200, centerY - 115, centerX + 200, centerY + 115, 0xFF1E1E1E);
+        context.drawTextWithShadow(this.textRenderer, t("Settings", "Настройки"), menuX, centerY - 100, 0xFFFFFF);
+        context.drawTextWithShadow(this.textRenderer, "esc", centerX + 170, centerY - 100, 0x6E6E6E);
 
         int themeColorInt = parseThemeColor(themeColor);
 
@@ -1013,6 +1047,7 @@ public class PromptCraftSettingsScreen extends Screen {
         }
 
         if (selectedTab == TAB_CREATE) {
+            renderReasoningBox(context, contentX - 5, contentY + 125, 190, 50);
         } else if (selectedTab == TAB_API) {
             context.drawTextWithShadow(this.textRenderer, t("Provider:", "Провайдер:"), contentX - 5, contentY - 12, 0xFFFFFF);
             context.drawTextWithShadow(this.textRenderer, "API Key:", contentX - 5, contentY + 26, 0xFFFFFF);
@@ -1219,6 +1254,71 @@ public class PromptCraftSettingsScreen extends Screen {
 
         int hY = hueY + (int) (pickerHue * HUE_H);
         context.fill(hueX - 2, hY - 1, hueX + HUE_W + 2, hY + 2, 0xFFFFFFFF);
+    }
+
+    private void renderReasoningBox(DrawContext context, int x, int y, int width, int height) {
+        context.fill(x, y, x + width, y + height, 0xFF141414);
+        context.fill(x, y, x + width, y + 1, 0xFF050505);
+        context.fill(x, y + height - 1, x + width, y + height, 0xFF3A3A3A);
+        context.fill(x, y, x + 1, y + height, 0xFF050505);
+        context.fill(x + width - 1, y, x + width, y + height, 0xFF050505);
+
+        boolean generating = dev.promptcraft.client.AiStreamState.isGenerating();
+        String error = dev.promptcraft.client.AiStreamState.getLastError();
+        String notice = dev.promptcraft.client.AiStreamState.getLastNotice();
+        String text = dev.promptcraft.client.AiStreamState.getReasoningText();
+
+        boolean showBottomBar = generating || error != null || notice != null;
+        int bottomBarHeight = showBottomBar ? 11 : 0;
+        int textAreaHeight = height - bottomBarHeight;
+
+        if (text.isEmpty()) {
+            String placeholder = generating
+                    ? t("Waiting for the model...", "Ожидание модели...")
+                    : t("AI thoughts will appear here...", "Мысли ИИ появятся здесь...");
+            context.drawTextWithShadow(this.textRenderer, placeholder, x + 4, y + 4, 0x707070);
+        } else {
+            long version = dev.promptcraft.client.AiStreamState.getVersion();
+            if (version != cachedReasoningVersion) {
+                cachedReasoningVersion = version;
+                cachedReasoningLines = this.textRenderer.wrapLines(Text.literal(text), width - 8);
+            }
+
+            int lineHeight = this.textRenderer.fontHeight + 1;
+            int maxVisibleLines = Math.max(1, textAreaHeight / lineHeight);
+            int totalLines = cachedReasoningLines.size();
+            int startLine = Math.max(0, totalLines - maxVisibleLines);
+
+            context.enableScissor(x + 1, y + 1, x + width - 1, y + textAreaHeight - 1);
+            int drawY = y + 3;
+            for (int i = startLine; i < totalLines; i++) {
+                context.drawTextWithShadow(this.textRenderer, cachedReasoningLines.get(i), x + 4, drawY, 0xC8C8C8);
+                drawY += lineHeight;
+            }
+            context.disableScissor();
+        }
+
+        if (error != null) {
+            context.fill(x, y + height - bottomBarHeight, x + width, y + height, 0x55550000);
+            String shown = this.textRenderer.getWidth(error) > width - 8
+                    ? this.textRenderer.trimToWidth(error, width - 14) + "..."
+                    : error;
+            context.drawTextWithShadow(this.textRenderer, shown, x + 4, y + height - 9, 0xFF7777);
+        } else if (generating) {
+            int themeRgb = parseThemeColor(themeColor) & 0x00FFFFFF;
+            int bgTint = 0x55000000 | themeRgb;
+            int textColor = 0xFF000000 | themeRgb;
+
+            context.fill(x, y + height - bottomBarHeight, x + width, y + height, bgTint);
+            String dots = ".".repeat((int) ((System.currentTimeMillis() / 400) % 4));
+            context.drawTextWithShadow(this.textRenderer, t("Thinking", "Думаю") + dots, x + 4, y + height - 9, textColor);
+        } else if (notice != null) {
+            String noticeText = "cancelled".equals(notice)
+                    ? t("Generation cancelled.", "Генерация отменена.")
+                    : notice;
+            context.fill(x, y + height - bottomBarHeight, x + width, y + height, 0x55333333);
+            context.drawTextWithShadow(this.textRenderer, noticeText, x + 4, y + height - 9, 0xAAAAAA);
+        }
     }
 
     private void renderMenuItem(DrawContext context, String text, int x, int y, boolean selected, int themeColor) {

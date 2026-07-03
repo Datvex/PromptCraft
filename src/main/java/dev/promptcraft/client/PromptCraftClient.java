@@ -47,6 +47,21 @@ public class PromptCraftClient implements ClientModInitializer {
             client.execute(() -> { firstPos = first; secondPos = second; });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(PromptCraftNetworking.AI_STREAM_PACKET, (client, handler, buf, responseSender) -> {
+            String eventType = buf.readString();
+            String payload = buf.readString();
+            client.execute(() -> {
+                switch (eventType) {
+                    case "start" -> AiStreamState.reset();
+                    case "reasoning" -> AiStreamState.append(payload);
+                    case "done" -> AiStreamState.finish();
+                    case "error" -> AiStreamState.fail(payload);
+                    case "cancelled" -> AiStreamState.cancelled();
+                    default -> {}
+                }
+            });
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(PromptCraftNetworking.OPEN_GUI_PACKET, (client, handler, buf, responseSender) -> {
             String provider = buf.readString();
             

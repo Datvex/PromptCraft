@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class PromptSessionManager {
     private static final Map<UUID, PendingPrompt> PENDING_PROMPTS = new ConcurrentHashMap<>();
     private static final Map<UUID, PendingPrompt> LAST_PROMPTS = new ConcurrentHashMap<>();
+    private static final Map<UUID, GenerationSession> ACTIVE_GENERATIONS = new ConcurrentHashMap<>();
 
     private PromptSessionManager() {}
 
@@ -31,5 +32,24 @@ public final class PromptSessionManager {
 
     public static Optional<PendingPrompt> getLast(ServerPlayerEntity player) {
         return Optional.ofNullable(LAST_PROMPTS.get(player.getUuid()));
+    }
+
+    public static GenerationSession startGeneration(ServerPlayerEntity player) {
+        GenerationSession session = new GenerationSession();
+        ACTIVE_GENERATIONS.put(player.getUuid(), session);
+        return session;
+    }
+
+    public static Optional<GenerationSession> getActiveGeneration(ServerPlayerEntity player) {
+        return Optional.ofNullable(ACTIVE_GENERATIONS.get(player.getUuid()));
+    }
+
+    public static boolean isGenerating(ServerPlayerEntity player) {
+        GenerationSession session = ACTIVE_GENERATIONS.get(player.getUuid());
+        return session != null && !session.isCancelled();
+    }
+
+    public static void clearGeneration(ServerPlayerEntity player) {
+        ACTIVE_GENERATIONS.remove(player.getUuid());
     }
 }
