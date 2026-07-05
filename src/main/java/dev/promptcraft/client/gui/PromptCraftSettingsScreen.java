@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import dev.promptcraft.PromptCraftMod;
+import dev.promptcraft.client.PromptDraftState;
 import dev.promptcraft.network.PromptCraftNetworking;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
@@ -17,7 +18,6 @@ import net.minecraft.client.gui.widget.SliderWidget;
 import net.minecraft.client.gui.widget.EditBoxWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.network.PacketByteBuf;
-import net.minecraft.text.OrderedText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
@@ -86,7 +86,6 @@ public class PromptCraftSettingsScreen extends Screen {
     private static final int PREVIEW_SIZE = 20;
 
     private static final long SAVE_DEBOUNCE_MS = 500L;
-    private static final int MAX_REASONING_TOKENS = 32000;
 
     private ProviderSelectButton providerButton;
     private PasswordFieldWidget apiKeyField;
@@ -113,11 +112,6 @@ public class PromptCraftSettingsScreen extends Screen {
     private TextFieldWidget maxHeightField;
     private TextFieldWidget maxDepthField;
 
-    private FlatButton reasoningLimitButton;
-    private ReasoningSlider reasoningSlider;
-    private TextFieldWidget reasoningTokenField;
-    private boolean updatingReasoningWidgets = false;
-
     private String provider;
     private Map<String, String> apiKeys;
     private String model;
@@ -132,9 +126,6 @@ public class PromptCraftSettingsScreen extends Screen {
     private int maxSelectionWidth;
     private int maxSelectionHeight;
     private int maxSelectionDepth;
-
-    private boolean reasoningLimitEnabled;
-    private int reasoningTokenLimit;
 
     private int selectedTab = TAB_CREATE;
 
@@ -158,9 +149,6 @@ public class PromptCraftSettingsScreen extends Screen {
     private boolean pendingSave = false;
     private long lastChangeTime = 0L;
 
-    private long cachedReasoningVersion = -1L;
-    private List<OrderedText> cachedReasoningLines = new ArrayList<>();
-
     public PromptCraftSettingsScreen(
             String provider,
             Map<String, String> apiKeys,
@@ -174,9 +162,7 @@ public class PromptCraftSettingsScreen extends Screen {
             boolean selectionLimitEnabled,
             int maxSelectionWidth,
             int maxSelectionHeight,
-            int maxSelectionDepth,
-            boolean reasoningLimitEnabled,
-            int reasoningTokenLimit
+            int maxSelectionDepth
     ) {
         super(Text.literal("PromptCraft Settings"));
         this.provider = provider != null && !provider.isBlank() ? provider : "nvidia";
@@ -194,9 +180,6 @@ public class PromptCraftSettingsScreen extends Screen {
         this.maxSelectionHeight = Math.max(1, maxSelectionHeight);
         this.maxSelectionDepth = Math.max(1, maxSelectionDepth);
 
-        this.reasoningLimitEnabled = reasoningLimitEnabled;
-        this.reasoningTokenLimit = Math.max(0, Math.min(MAX_REASONING_TOKENS, reasoningTokenLimit));
-
         hexToHsv(this.themeColor);
     }
 
@@ -213,10 +196,6 @@ public class PromptCraftSettingsScreen extends Screen {
         return ("ru".equals(language) ? TAB_NAMES_RU : TAB_NAMES_EN)[index];
     }
 
-    private boolean isClaudeProvider() {
-        return "anthropic".equals(provider);
-    }
-
     @Override
     protected void init() {
         int centerX = this.width / 2;
@@ -225,22 +204,23 @@ public class PromptCraftSettingsScreen extends Screen {
         int contentX = centerX - 30;
         int contentY = menuY;
 
-        promptField = new net.minecraft.client.gui.widget.EditBoxWidget(this.textRenderer, contentX - 5, contentY, 190, 45, Text.literal("Prompt"), Text.literal(""));
+        promptField = new net.minecraft.client.gui.widget.EditBoxWidget(this.textRenderer, contentX - 5, contentY, 190, 95, Text.literal("Prompt"), Text.literal(""));
+        promptField.setText(PromptDraftState.get());
         this.addDrawableChild(promptField);
 
-        generateButton = new FlatButton(contentX - 5, contentY + 50, 90, 20, Text.literal("Generate"), b -> sendGuiActionKeepOpen("generate", promptField.getText()));
+        generateButton = new FlatButton(contentX - 5, contentY + 100, 90, 20, Text.literal("Generate"), b -> sendGuiActionKeepOpen("generate", promptField.getText()));
         this.addDrawableChild(generateButton);
 
-        editButton = new FlatButton(contentX + 95, contentY + 50, 90, 20, Text.literal("Edit"), b -> sendGuiActionKeepOpen("edit", promptField.getText()));
+        editButton = new FlatButton(contentX + 95, contentY + 100, 90, 20, Text.literal("Edit"), b -> sendGuiActionKeepOpen("edit", promptField.getText()));
         this.addDrawableChild(editButton);
 
-        undoButton = new FlatButton(contentX - 5, contentY + 75, 190, 20, Text.literal("Undo (Clear)"), b -> sendGuiAction("undo", ""));
+        undoButton = new FlatButton(contentX - 5, contentY + 125, 190, 20, Text.literal("Undo (Clear)"), b -> sendGuiAction("undo", ""));
         this.addDrawableChild(undoButton);
 
-        backButton = new FlatButton(contentX - 5, contentY + 100, 90, 20, Text.literal("<< Back"), b -> sendGuiAction("back", ""));
+        backButton = new FlatButton(contentX - 5, contentY + 150, 90, 20, Text.literal("<< Back"), b -> sendGuiAction("back", ""));
         this.addDrawableChild(backButton);
 
-        nextButton = new FlatButton(contentX + 95, contentY + 100, 90, 20, Text.literal("Next >>"), b -> sendGuiAction("next", ""));
+        nextButton = new FlatButton(contentX + 95, contentY + 150, 90, 20, Text.literal("Next >>"), b -> sendGuiAction("next", ""));
         this.addDrawableChild(nextButton);
 
         providerButton = new ProviderSelectButton(
@@ -350,50 +330,9 @@ public class PromptCraftSettingsScreen extends Screen {
 
         // --- LIMITS TAB WIDGETS ---
 
-        // Reasoning token limit
-        reasoningLimitButton = new FlatButton(
-                contentX - 5,
-                contentY + 12,
-                190,
-                20,
-                Text.literal(getReasoningLimitButtonText()),
-                button -> {
-                    reasoningLimitEnabled = !reasoningLimitEnabled;
-                    button.setMessage(Text.literal(getReasoningLimitButtonText()));
-                    markDirty();
-                    updateWidgetVisibility();
-                }
-        );
-        this.addDrawableChild(reasoningLimitButton);
-
-        reasoningSlider = new ReasoningSlider(contentX - 5, contentY + 40, 130, 16, reasoningTokenLimit);
-        this.addDrawableChild(reasoningSlider);
-
-        reasoningTokenField = new TextFieldWidget(this.textRenderer, contentX + 130, contentY + 42, 55, 12, Text.literal("Tokens"));
-        reasoningTokenField.setMaxLength(6);
-        reasoningTokenField.setText(String.valueOf(reasoningTokenLimit));
-        reasoningTokenField.setTextPredicate(s -> s.isEmpty() || s.matches("\\d{1,6}"));
-        reasoningTokenField.setChangedListener(text -> {
-            if (updatingReasoningWidgets) return;
-            int val;
-            try {
-                val = text.isEmpty() ? 0 : Integer.parseInt(text);
-            } catch (Exception ignored) {
-                return;
-            }
-            val = Math.max(0, Math.min(MAX_REASONING_TOKENS, val));
-            reasoningTokenLimit = val;
-            updatingReasoningWidgets = true;
-            reasoningSlider.setValueFromExternal(val);
-            updatingReasoningWidgets = false;
-            markDirty();
-        });
-        this.addDrawableChild(reasoningTokenField);
-
-        // Build area limit
         limitEnabledButton = new FlatButton(
                 contentX - 5,
-                contentY + 78,
+                contentY,
                 190,
                 20,
                 Text.literal(getLimitEnabledText()),
@@ -406,7 +345,7 @@ public class PromptCraftSettingsScreen extends Screen {
         );
         this.addDrawableChild(limitEnabledButton);
 
-        maxWidthField = new TextFieldWidget(this.textRenderer, contentX + 12, contentY + 120, 45, 16, Text.literal("W"));
+        maxWidthField = new TextFieldWidget(this.textRenderer, contentX + 12, contentY + 44, 45, 16, Text.literal("W"));
         maxWidthField.setMaxLength(5);
         maxWidthField.setText(String.valueOf(maxSelectionWidth));
         maxWidthField.setTextPredicate(s -> s.isEmpty() || s.matches("\\d{1,5}"));
@@ -419,7 +358,7 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(maxWidthField);
 
-        maxHeightField = new TextFieldWidget(this.textRenderer, contentX + 85, contentY + 120, 45, 16, Text.literal("H"));
+        maxHeightField = new TextFieldWidget(this.textRenderer, contentX + 85, contentY + 44, 45, 16, Text.literal("H"));
         maxHeightField.setMaxLength(5);
         maxHeightField.setText(String.valueOf(maxSelectionHeight));
         maxHeightField.setTextPredicate(s -> s.isEmpty() || s.matches("\\d{1,5}"));
@@ -432,7 +371,7 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(maxHeightField);
 
-        maxDepthField = new TextFieldWidget(this.textRenderer, contentX + 158, contentY + 120, 45, 16, Text.literal("D"));
+        maxDepthField = new TextFieldWidget(this.textRenderer, contentX + 158, contentY + 44, 45, 16, Text.literal("D"));
         maxDepthField.setMaxLength(5);
         maxDepthField.setText(String.valueOf(maxSelectionDepth));
         maxDepthField.setTextPredicate(s -> s.isEmpty() || s.matches("\\d{1,5}"));
@@ -466,7 +405,6 @@ public class PromptCraftSettingsScreen extends Screen {
         boolean isTheme = selectedTab == TAB_THEME;
         boolean isVisual = selectedTab == TAB_VISUAL;
         boolean isLimits = selectedTab == TAB_LIMITS;
-        boolean isClaude = isClaudeProvider();
 
         if (promptField != null) { promptField.visible = isCreate; promptField.active = isCreate; }
         if (generateButton != null) { generateButton.visible = isCreate; generateButton.active = isCreate; }
@@ -489,11 +427,6 @@ public class PromptCraftSettingsScreen extends Screen {
         if (outlineButton != null) { outlineButton.visible = isVisual; outlineButton.active = isVisual; }
         if (outlineThroughBlocksButton != null) { outlineThroughBlocksButton.visible = isVisual; outlineThroughBlocksButton.active = isVisual; }
         if (opacitySlider != null) { opacitySlider.visible = isVisual; opacitySlider.active = isVisual; }
-
-        if (reasoningLimitButton != null) { reasoningLimitButton.visible = isLimits; reasoningLimitButton.active = isLimits && isClaude; }
-        boolean reasoningFieldsActive = isLimits && isClaude && reasoningLimitEnabled;
-        if (reasoningSlider != null) { reasoningSlider.visible = isLimits; reasoningSlider.active = reasoningFieldsActive; }
-        if (reasoningTokenField != null) { reasoningTokenField.visible = isLimits; reasoningTokenField.active = reasoningFieldsActive; reasoningTokenField.setEditable(isClaude && reasoningLimitEnabled); }
 
         if (limitEnabledButton != null) { limitEnabledButton.visible = isLimits; limitEnabledButton.active = isLimits; }
         boolean limitFieldsActive = isLimits && selectionLimitEnabled;
@@ -530,6 +463,10 @@ public class PromptCraftSettingsScreen extends Screen {
             flushSave();
         }
 
+        if (promptField != null) {
+            PromptDraftState.set(promptField.getText());
+        }
+
         boolean generating = dev.promptcraft.client.AiStreamState.isGenerating();
         boolean createActive = selectedTab == TAB_CREATE;
 
@@ -551,6 +488,9 @@ public class PromptCraftSettingsScreen extends Screen {
     @Override
     public void removed() {
         super.removed();
+        if (promptField != null) {
+            PromptDraftState.set(promptField.getText());
+        }
         if (pendingSave) {
             flushSave();
         }
@@ -584,9 +524,6 @@ public class PromptCraftSettingsScreen extends Screen {
         buf.writeInt(maxSelectionWidth);
         buf.writeInt(maxSelectionHeight);
         buf.writeInt(maxSelectionDepth);
-
-        buf.writeBoolean(reasoningLimitEnabled);
-        buf.writeInt(reasoningTokenLimit);
 
         ClientPlayNetworking.send(PromptCraftNetworking.SAVE_GUI_PACKET, buf);
         pendingSave = false;
@@ -871,9 +808,6 @@ public class PromptCraftSettingsScreen extends Screen {
                     modelButton.setMessage(Text.literal(shortenModelName(model)));
                     apiKeyField.setText(apiKeys.getOrDefault(provider, ""));
 
-                    if (reasoningLimitButton != null) {
-                        reasoningLimitButton.setMessage(Text.literal(getReasoningLimitButtonText()));
-                    }
                     updateWidgetVisibility();
 
                     markDirty();
@@ -914,7 +848,6 @@ public class PromptCraftSettingsScreen extends Screen {
                 outlineThroughBlocksButton.setMessage(Text.literal(getOutlineThroughBlocksButtonText()));
                 opacitySlider.updateMessage();
                 limitEnabledButton.setMessage(Text.literal(getLimitEnabledText()));
-                reasoningLimitButton.setMessage(Text.literal(getReasoningLimitButtonText()));
 
                 markDirty();
                 return true;
@@ -1046,9 +979,7 @@ public class PromptCraftSettingsScreen extends Screen {
             renderMenuItem(context, tabName(i), menuX, menuY + i * 25, selectedTab == i, themeColorInt);
         }
 
-        if (selectedTab == TAB_CREATE) {
-            renderReasoningBox(context, contentX - 5, contentY + 125, 190, 50);
-        } else if (selectedTab == TAB_API) {
+        if (selectedTab == TAB_API) {
             context.drawTextWithShadow(this.textRenderer, t("Provider:", "Провайдер:"), contentX - 5, contentY - 12, 0xFFFFFF);
             context.drawTextWithShadow(this.textRenderer, "API Key:", contentX - 5, contentY + 26, 0xFFFFFF);
             context.drawTextWithShadow(this.textRenderer, "Model:", contentX - 5, contentY + 68, 0xFFFFFF);
@@ -1072,19 +1003,13 @@ public class PromptCraftSettingsScreen extends Screen {
             context.drawTextWithShadow(this.textRenderer, t("Through blocks:", "Сквозь блоки:"), contentX - 5, contentY + 30, 0xFFFFFF);
             context.drawTextWithShadow(this.textRenderer, t("Fill opacity:", "Прозрачность заливки:"), contentX - 5, contentY + 70, 0xFFFFFF);
         } else if (selectedTab == TAB_LIMITS) {
-            boolean claude = isClaudeProvider();
-            int reasoningLabelColor = claude ? 0xFFFFFF : 0x6E6E6E;
-
-            context.drawTextWithShadow(this.textRenderer, t("Reasoning Token Limit:", "Лимит токенов рассуждений:"), contentX - 5, contentY - 14, reasoningLabelColor);
-            context.drawTextWithShadow(this.textRenderer, t("(Anthropic Claude models only)", "(только для моделей Anthropic Claude)"), contentX - 5, contentY - 3, 0x707070);
-
-            context.drawTextWithShadow(this.textRenderer, t("Build Area Limit:", "Лимит области постройки:"), contentX - 5, contentY + 64, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, t("Build Area Limit:", "Лимит области постройки:"), contentX - 5, contentY - 14, 0xFFFFFF);
 
             int labelColor = selectionLimitEnabled ? 0xFFFFFF : 0x6E6E6E;
-            context.drawTextWithShadow(this.textRenderer, t("Max Size:", "Макс. размер:"), contentX - 5, contentY + 106, labelColor);
-            context.drawTextWithShadow(this.textRenderer, "W:", contentX - 5, contentY + 123, labelColor);
-            context.drawTextWithShadow(this.textRenderer, "H:", contentX + 68, contentY + 123, labelColor);
-            context.drawTextWithShadow(this.textRenderer, "D:", contentX + 141, contentY + 123, labelColor);
+            context.drawTextWithShadow(this.textRenderer, t("Max Size:", "Макс. размер:"), contentX - 5, contentY + 30, labelColor);
+            context.drawTextWithShadow(this.textRenderer, "W:", contentX - 5, contentY + 47, labelColor);
+            context.drawTextWithShadow(this.textRenderer, "H:", contentX + 68, contentY + 47, labelColor);
+            context.drawTextWithShadow(this.textRenderer, "D:", contentX + 141, contentY + 47, labelColor);
         }
 
         super.render(context, mouseX, mouseY, delta);
@@ -1256,71 +1181,6 @@ public class PromptCraftSettingsScreen extends Screen {
         context.fill(hueX - 2, hY - 1, hueX + HUE_W + 2, hY + 2, 0xFFFFFFFF);
     }
 
-    private void renderReasoningBox(DrawContext context, int x, int y, int width, int height) {
-        context.fill(x, y, x + width, y + height, 0xFF141414);
-        context.fill(x, y, x + width, y + 1, 0xFF050505);
-        context.fill(x, y + height - 1, x + width, y + height, 0xFF3A3A3A);
-        context.fill(x, y, x + 1, y + height, 0xFF050505);
-        context.fill(x + width - 1, y, x + width, y + height, 0xFF050505);
-
-        boolean generating = dev.promptcraft.client.AiStreamState.isGenerating();
-        String error = dev.promptcraft.client.AiStreamState.getLastError();
-        String notice = dev.promptcraft.client.AiStreamState.getLastNotice();
-        String text = dev.promptcraft.client.AiStreamState.getReasoningText();
-
-        boolean showBottomBar = generating || error != null || notice != null;
-        int bottomBarHeight = showBottomBar ? 11 : 0;
-        int textAreaHeight = height - bottomBarHeight;
-
-        if (text.isEmpty()) {
-            String placeholder = generating
-                    ? t("Waiting for the model...", "Ожидание модели...")
-                    : t("AI thoughts will appear here...", "Мысли ИИ появятся здесь...");
-            context.drawTextWithShadow(this.textRenderer, placeholder, x + 4, y + 4, 0x707070);
-        } else {
-            long version = dev.promptcraft.client.AiStreamState.getVersion();
-            if (version != cachedReasoningVersion) {
-                cachedReasoningVersion = version;
-                cachedReasoningLines = this.textRenderer.wrapLines(Text.literal(text), width - 8);
-            }
-
-            int lineHeight = this.textRenderer.fontHeight + 1;
-            int maxVisibleLines = Math.max(1, textAreaHeight / lineHeight);
-            int totalLines = cachedReasoningLines.size();
-            int startLine = Math.max(0, totalLines - maxVisibleLines);
-
-            context.enableScissor(x + 1, y + 1, x + width - 1, y + textAreaHeight - 1);
-            int drawY = y + 3;
-            for (int i = startLine; i < totalLines; i++) {
-                context.drawTextWithShadow(this.textRenderer, cachedReasoningLines.get(i), x + 4, drawY, 0xC8C8C8);
-                drawY += lineHeight;
-            }
-            context.disableScissor();
-        }
-
-        if (error != null) {
-            context.fill(x, y + height - bottomBarHeight, x + width, y + height, 0x55550000);
-            String shown = this.textRenderer.getWidth(error) > width - 8
-                    ? this.textRenderer.trimToWidth(error, width - 14) + "..."
-                    : error;
-            context.drawTextWithShadow(this.textRenderer, shown, x + 4, y + height - 9, 0xFF7777);
-        } else if (generating) {
-            int themeRgb = parseThemeColor(themeColor) & 0x00FFFFFF;
-            int bgTint = 0x55000000 | themeRgb;
-            int textColor = 0xFF000000 | themeRgb;
-
-            context.fill(x, y + height - bottomBarHeight, x + width, y + height, bgTint);
-            String dots = ".".repeat((int) ((System.currentTimeMillis() / 400) % 4));
-            context.drawTextWithShadow(this.textRenderer, t("Thinking", "Думаю") + dots, x + 4, y + height - 9, textColor);
-        } else if (notice != null) {
-            String noticeText = "cancelled".equals(notice)
-                    ? t("Generation cancelled.", "Генерация отменена.")
-                    : notice;
-            context.fill(x, y + height - bottomBarHeight, x + width, y + height, 0x55333333);
-            context.drawTextWithShadow(this.textRenderer, noticeText, x + 4, y + height - 9, 0xAAAAAA);
-        }
-    }
-
     private void renderMenuItem(DrawContext context, String text, int x, int y, boolean selected, int themeColor) {
         if (selected) {
             context.fill(x, y, x + 120, y + 20, themeColor);
@@ -1418,13 +1278,6 @@ public class PromptCraftSettingsScreen extends Screen {
 
     private String getLimitEnabledText() {
         return t("Area Limit: ", "Лимит области: ") + (selectionLimitEnabled ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"));
-    }
-
-    private String getReasoningLimitButtonText() {
-        if (!isClaudeProvider()) {
-            return t("Reasoning Limit (Claude only)", "Лимит рассуждений (только Claude)");
-        }
-        return t("Reasoning Limit: ", "Лимит рассуждений: ") + (reasoningLimitEnabled ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"));
     }
 
     private int parseThemeColor(String hex) {
@@ -1643,50 +1496,6 @@ public class PromptCraftSettingsScreen extends Screen {
                 int cursorX = this.getX() + PromptCraftSettingsScreen.this.textRenderer.getWidth(shown);
                 context.fill(cursorX + 1, this.getY(), cursorX + 2, this.getY() + 11, 0xFFFFFFFF);
             }
-        }
-    }
-
-    private class ReasoningSlider extends SliderWidget {
-        public ReasoningSlider(int x, int y, int width, int height, int initialTokens) {
-            super(x, y, width, height, Text.empty(), Math.max(0.0D, Math.min(1.0D, initialTokens / (double) MAX_REASONING_TOKENS)));
-            updateMessage();
-        }
-
-        @Override
-        protected void updateMessage() {
-            this.setMessage(Text.empty());
-        }
-
-        @Override
-        protected void applyValue() {
-            int tokens = (int) Math.round(this.value * MAX_REASONING_TOKENS);
-            reasoningTokenLimit = tokens;
-
-            if (!updatingReasoningWidgets && reasoningTokenField != null) {
-                updatingReasoningWidgets = true;
-                reasoningTokenField.setText(String.valueOf(tokens));
-                updatingReasoningWidgets = false;
-            }
-
-            markDirty();
-        }
-
-        public void setValueFromExternal(int tokens) {
-            this.value = Math.max(0.0D, Math.min(1.0D, tokens / (double) MAX_REASONING_TOKENS));
-            updateMessage();
-        }
-
-        @Override
-        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            if (!this.visible) return;
-
-            int bgColor = this.isHovered() ? 0xFF3D3D3D : 0xFF2D2D2D;
-            int themeColorInt = this.active ? parseThemeColor(themeColor) : 0xFF4A4A4A;
-
-            context.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height, bgColor);
-
-            int fillW = (int) (this.width * this.value);
-            context.fill(this.getX(), this.getY(), this.getX() + fillW, this.getY() + this.height, themeColorInt);
         }
     }
 

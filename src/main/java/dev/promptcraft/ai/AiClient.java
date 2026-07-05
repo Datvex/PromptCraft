@@ -38,7 +38,6 @@ public class AiClient {
         return t;
     });
 
-    private static final int ANSWER_RESERVE_TOKENS = 8192;
     private static final long REQUEST_TIMEOUT_SECONDS = 300L;
 
     public static CompletableFuture<PromptCraftStructure> requestBuild(
@@ -381,9 +380,6 @@ public class AiClient {
                 .header("Content-Type", "application/json")
                 .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS));
 
-        boolean reasoningEnabled = "anthropic".equals(config.provider) && config.reasoningLimitEnabled;
-        int reasoningBudget = Math.max(1, config.reasoningTokenLimit);
-
         switch (config.provider) {
             case "anthropic":
                 url = "https://api.anthropic.com/v1/messages";
@@ -392,21 +388,8 @@ public class AiClient {
                 payload.addProperty("model", config.model);
                 payload.addProperty("system", systemPrompt);
                 payload.addProperty("stream", true);
-
-                int anthropicMaxTokens = 8192;
-
-                if (reasoningEnabled) {
-                    anthropicMaxTokens = Math.max(anthropicMaxTokens, reasoningBudget + ANSWER_RESERVE_TOKENS);
-
-                    JsonObject thinking = new JsonObject();
-                    thinking.addProperty("type", "enabled");
-                    thinking.addProperty("budget_tokens", reasoningBudget);
-                    payload.add("thinking", thinking);
-                } else {
-                    payload.addProperty("temperature", 0.3);
-                }
-
-                payload.addProperty("max_tokens", anthropicMaxTokens);
+                payload.addProperty("temperature", 0.3);
+                payload.addProperty("max_tokens", 8192);
 
                 JsonObject anthropicMsg = new JsonObject();
                 anthropicMsg.addProperty("role", "user");

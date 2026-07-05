@@ -50,9 +50,6 @@ public class PromptCraftNetworking {
             int maxSelectionHeight = buf.readInt();
             int maxSelectionDepth = buf.readInt();
 
-            boolean reasoningLimitEnabled = buf.readBoolean();
-            int reasoningTokenLimit = buf.readInt();
-
             server.execute(() -> {
                 if (!dev.promptcraft.PromptCraftCommands.hasAccess(player)) return;
 
@@ -71,9 +68,6 @@ public class PromptCraftNetworking {
                 config.maxSelectionWidth = Math.max(1, maxSelectionWidth);
                 config.maxSelectionHeight = Math.max(1, maxSelectionHeight);
                 config.maxSelectionDepth = Math.max(1, maxSelectionDepth);
-
-                config.reasoningLimitEnabled = reasoningLimitEnabled;
-                config.reasoningTokenLimit = Math.max(0, reasoningTokenLimit);
 
                 PromptCraftConfigManager.save();
             });
@@ -197,9 +191,6 @@ public class PromptCraftNetworking {
         buf.writeInt(config.maxSelectionWidth);
         buf.writeInt(config.maxSelectionHeight);
         buf.writeInt(config.maxSelectionDepth);
-
-        buf.writeBoolean(config.reasoningLimitEnabled);
-        buf.writeInt(config.reasoningTokenLimit);
 
         ServerPlayNetworking.send(player, OPEN_GUI_PACKET, buf);
     }
