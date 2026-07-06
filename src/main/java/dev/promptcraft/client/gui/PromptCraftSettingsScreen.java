@@ -17,6 +17,7 @@ import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.client.gui.widget.SliderWidget;
 import net.minecraft.client.gui.widget.EditBoxWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.client.gui.tooltip.Tooltip;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
@@ -33,6 +34,7 @@ import java.util.Map;
 
 public class PromptCraftSettingsScreen extends Screen {
     private static final Identifier REFRESH_ICON = new Identifier(PromptCraftMod.MOD_ID, "textures/gui/refresh_icon.png");
+    private static final Identifier RESET_COLOR_ICON = new Identifier(PromptCraftMod.MOD_ID, "textures/gui/reload_icon.png");
 
     private static final Identifier NVIDIA_ICON = new Identifier(PromptCraftMod.MOD_ID, "textures/gui/nvidia.png");
     private static final Identifier OPENAI_ICON = new Identifier(PromptCraftMod.MOD_ID, "textures/gui/openai.png");
@@ -98,6 +100,7 @@ public class PromptCraftSettingsScreen extends Screen {
     private FlatButton outlineThroughBlocksButton;
     private OpacitySlider opacitySlider;
     private TextFieldWidget hexColorField;
+    private IconButton resetColorButton;
     private TextFieldWidget modelSearchField;
 
     private EditBoxWidget promptField;
@@ -328,6 +331,24 @@ public class PromptCraftSettingsScreen extends Screen {
         });
         this.addDrawableChild(hexColorField);
 
+        int svX = contentX;
+        int svY = contentY + 5;
+        int hueX = svX + SV_SIZE + 8;
+        int hueY = svY;
+        int previewX = hueX + HUE_W + 12;
+        int previewY = hueY;
+
+        resetColorButton = new IconButton(
+                previewX,
+                previewY + PREVIEW_SIZE + 8,
+                20,
+                20,
+                RESET_COLOR_ICON,
+                button -> resetThemeColor()
+        );
+        resetColorButton.setTooltip(Tooltip.of(Text.literal(t("Reset to default", "Сбросить по умолчанию"))));
+        this.addDrawableChild(resetColorButton);
+
         // --- LIMITS TAB WIDGETS ---
 
         limitEnabledButton = new FlatButton(
@@ -423,6 +444,7 @@ public class PromptCraftSettingsScreen extends Screen {
         if (langButton != null) { langButton.visible = isLang; langButton.active = isLang; }
 
         if (hexColorField != null) { hexColorField.visible = isTheme; hexColorField.active = isTheme; }
+        if (resetColorButton != null) { resetColorButton.visible = isTheme; resetColorButton.active = isTheme; }
 
         if (outlineButton != null) { outlineButton.visible = isVisual; outlineButton.active = isVisual; }
         if (outlineThroughBlocksButton != null) { outlineThroughBlocksButton.visible = isVisual; outlineThroughBlocksButton.active = isVisual; }
@@ -454,6 +476,13 @@ public class PromptCraftSettingsScreen extends Screen {
     private void markDirty() {
         pendingSave = true;
         lastChangeTime = System.currentTimeMillis();
+    }
+
+    private void resetThemeColor() {
+        themeColor = "#17b95f";
+        hexToHsv(themeColor);
+        hexColorField.setText(themeColor);
+        markDirty();
     }
 
     @Override
@@ -1441,10 +1470,16 @@ public class PromptCraftSettingsScreen extends Screen {
 
     private class IconButton extends ButtonWidget {
         private final Identifier texture;
+        private final int iconSize;
 
         public IconButton(int x, int y, int width, int height, Identifier texture, PressAction onPress) {
+            this(x, y, width, height, texture, 32, onPress);
+        }
+
+        public IconButton(int x, int y, int width, int height, Identifier texture, int iconSize, PressAction onPress) {
             super(x, y, width, height, Text.empty(), onPress, DEFAULT_NARRATION_SUPPLIER);
             this.texture = texture;
+            this.iconSize = iconSize;
         }
 
         @Override
@@ -1454,11 +1489,19 @@ public class PromptCraftSettingsScreen extends Screen {
             int bgColor = this.isHovered() ? 0xFF3D3D3D : 0xFF2D2D2D;
             context.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height, bgColor);
 
-            context.getMatrices().push();
-            context.getMatrices().translate(this.getX() + 3, this.getY() + 3, 0);
-            context.getMatrices().scale(0.5f, 0.5f, 1.0f);
-            context.drawTexture(texture, 0, 0, 0, 0, 32, 32, 32, 32);
-            context.getMatrices().pop();
+            int displaySize = 16;
+            int offsetX = (this.width - displaySize) / 2;
+            int offsetY = (this.height - displaySize) / 2;
+
+            if (iconSize == 16) {
+                context.drawTexture(texture, this.getX() + offsetX, this.getY() + offsetY, 0, 0, 16, 16, 16, 16);
+            } else {
+                context.getMatrices().push();
+                context.getMatrices().translate(this.getX() + offsetX, this.getY() + offsetY, 0);
+                context.getMatrices().scale(0.5f, 0.5f, 1.0f);
+                context.drawTexture(texture, 0, 0, 0, 0, 32, 32, 32, 32);
+                context.getMatrices().pop();
+            }
         }
     }
 
