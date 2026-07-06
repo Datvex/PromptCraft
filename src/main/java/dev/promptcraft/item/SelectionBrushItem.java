@@ -47,13 +47,6 @@ public class SelectionBrushItem extends Item {
         PromptCraftNetworking.syncSelection(serverPlayer, selection);
 
         serverPlayer.sendMessage(Text.literal("Second position set at " + formatPos(pos)).formatted(Formatting.AQUA), false);
-
-        if (!SelectionManager.isWithinLimit(selection)) {
-            PromptCraftConfig config = PromptCraftConfigManager.get();
-            serverPlayer.sendMessage(Text.literal("Selection too large!").formatted(Formatting.RED), false);
-            return ActionResult.SUCCESS;
-        }
-
         serverPlayer.sendMessage(Text.literal("Selection ready! Area: " + selection.getWidth() + "x" + selection.getHeight() + "x" + selection.getDepth()).formatted(Formatting.GREEN), false);
         return ActionResult.SUCCESS;
     }

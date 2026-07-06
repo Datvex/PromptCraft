@@ -1,14 +1,29 @@
+# Gradle
 .gradle/
 build/
+bin/
+out/
+classes/
 
+# Fabric Loom run directory (сюда попадают ключи, сохранения, логи и т.д.)
 run/
 
-.vscode/
+# IDE
 .idea/
 *.iml
 *.ipr
 *.iws
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
 
-bin/
-out/
+# OS
 .DS_Store
+Thumbs.db
+
+# Secrets — на всякий случай, если .env окажется где-то ещё (например, в src/ или в корне)
+.env
+*.env
+**/.env

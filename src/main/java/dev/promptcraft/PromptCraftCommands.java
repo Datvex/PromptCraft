@@ -29,6 +29,14 @@ public final class PromptCraftCommands {
 
         AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
             if (world.isClient() || !(player instanceof ServerPlayerEntity serverPlayer)) return ActionResult.PASS;
+
+            // Пока у игрока висит предпросмотр свободной постройки, ЛКМ используется
+            // только для подтверждения размещения и не должна ломать блоки в мире.
+            var activeSession = dev.promptcraft.session.PromptSessionManager.getActiveGeneration(serverPlayer);
+            if (activeSession.isPresent() && activeSession.get().isGhostPending()) {
+                return ActionResult.FAIL;
+            }
+
             ItemStack stack = serverPlayer.getStackInHand(hand);
             if (!stack.isOf(PromptCraftItems.SELECTION_BRUSH)) return ActionResult.PASS;
             if (!hasAccess(serverPlayer)) {

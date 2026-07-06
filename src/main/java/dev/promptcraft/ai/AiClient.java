@@ -40,6 +40,8 @@ public class AiClient {
 
     private static final long REQUEST_TIMEOUT_SECONDS = 300L;
 
+    private static final int FREE_MODE_SAFETY_CEILING = 96;
+
     public static CompletableFuture<PromptCraftStructure> requestBuild(
             ServerPlayerEntity player,
             String prompt,
@@ -47,6 +49,22 @@ public class AiClient {
             int height,
             int depth,
             GenerationSession session
+    ) {
+        return requestBuild(player, prompt, width, height, depth, session, false);
+    }
+
+    /**
+     * @param freeChoice true - режим "AI сам выбирает зону"; ширина/высота/глубина в этом случае
+     *                   передаются как безопасный потолок, а не как обязательный к заполнению размер.
+     */
+    public static CompletableFuture<PromptCraftStructure> requestBuild(
+            ServerPlayerEntity player,
+            String prompt,
+            int width,
+            int height,
+            int depth,
+            GenerationSession session,
+            boolean freeChoice
     ) {
         PromptCraftConfig config = PromptCraftConfigManager.get();
         String apiKey = PromptCraftEnv.getApiKey(config.provider);
@@ -63,7 +81,7 @@ public class AiClient {
 
         PromptCraftNetworking.sendAiStreamEvent(player, "start", "");
 
-        String systemPrompt = buildSystemPrompt(width, height, depth);
+        String systemPrompt = buildSystemPrompt(width, height, depth, freeChoice);
         String userPrompt = "Build the following, respecting ALL rules above: " + prompt;
 
         HttpRequest request = buildRequest(config, apiKey, systemPrompt, userPrompt);
@@ -124,6 +142,21 @@ public class AiClient {
                     }
                     return null;
                 });
+    }
+
+    public static CompletableFuture<PromptCraftStructure> requestFreeBuild(
+            ServerPlayerEntity player,
+            String prompt,
+            boolean limitEnabled,
+            int maxWidth,
+            int maxHeight,
+            int maxDepth,
+            GenerationSession session
+    ) {
+        int width = limitEnabled ? maxWidth : FREE_MODE_SAFETY_CEILING;
+        int height = limitEnabled ? maxHeight : FREE_MODE_SAFETY_CEILING;
+        int depth = limitEnabled ? maxDepth : FREE_MODE_SAFETY_CEILING;
+        return requestBuild(player, prompt, width, height, depth, session, true);
     }
 
     // =========================================================================
@@ -294,8 +327,14 @@ public class AiClient {
     // === REQUEST BUILDING
     // =========================================================================
 
-    private static String buildSystemPrompt(int width, int height, int depth) {
+    private static String buildSystemPrompt(int width, int height, int depth, boolean freeChoice) {
         String blockList = BlockCatalog.getBlockListForPrompt();
+
+        String areaNote = freeChoice
+                ? "\n\nNote: this bounding box is a generous safety ceiling, not a target you must fill. " +
+                  "You have full creative freedom to choose whatever footprint size naturally fits the user's " +
+                  "request - small or large - as long as every coordinate stays within the box above."
+                : "";
 
         return "You are an expert Minecraft Java Edition architect and building assistant. " +
                 "Your task is to design a structure and output it as a precise sequence of build operations in JSON format.\n\n" +
@@ -370,7 +409,8 @@ public class AiClient {
 
                 "=== BUILD AREA ===\n" +
                 "Bounding box size: width=" + width + ", height=" + height + ", depth=" + depth +
-                " (coordinates range from [0,0,0] to [" + (width - 1) + "," + (height - 1) + "," + (depth - 1) + "] inclusive).";
+                " (coordinates range from [0,0,0] to [" + (width - 1) + "," + (height - 1) + "," + (depth - 1) + "] inclusive)."
+                + areaNote;
     }
 
     private static HttpRequest buildRequest(PromptCraftConfig config, String apiKey, String systemPrompt, String userPrompt) {

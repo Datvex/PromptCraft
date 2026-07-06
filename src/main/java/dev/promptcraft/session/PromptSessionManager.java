@@ -8,23 +8,10 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class PromptSessionManager {
-    private static final Map<UUID, PendingPrompt> PENDING_PROMPTS = new ConcurrentHashMap<>();
     private static final Map<UUID, PendingPrompt> LAST_PROMPTS = new ConcurrentHashMap<>();
     private static final Map<UUID, GenerationSession> ACTIVE_GENERATIONS = new ConcurrentHashMap<>();
 
     private PromptSessionManager() {}
-
-    public static void setPending(ServerPlayerEntity player, PendingPrompt prompt) {
-        PENDING_PROMPTS.put(player.getUuid(), prompt);
-    }
-
-    public static Optional<PendingPrompt> getPending(ServerPlayerEntity player) {
-        return Optional.ofNullable(PENDING_PROMPTS.get(player.getUuid()));
-    }
-
-    public static void clearPending(ServerPlayerEntity player) {
-        PENDING_PROMPTS.remove(player.getUuid());
-    }
 
     public static void setLast(ServerPlayerEntity player, PendingPrompt prompt) {
         LAST_PROMPTS.put(player.getUuid(), prompt);

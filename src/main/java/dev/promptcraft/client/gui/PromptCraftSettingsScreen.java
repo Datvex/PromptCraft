@@ -109,6 +109,11 @@ public class PromptCraftSettingsScreen extends Screen {
     private FlatButton undoButton;
     private FlatButton backButton;
     private FlatButton nextButton;
+    private FlatButton modeButton;
+    private boolean modeMenuOpen = false;
+    private static final String[] MODE_OPTIONS = {"Manual Area", "AI Free Area"};
+    private static final String[] MODE_OPTIONS_RU = {"Ручной выбор", "Свободный (от ИИ)"};
+    private static final String[] MODE_CODES = {"manual", "free"};
 
     private FlatButton limitEnabledButton;
     private TextFieldWidget maxWidthField;
@@ -125,6 +130,7 @@ public class PromptCraftSettingsScreen extends Screen {
     private float fillOpacity;
     private boolean outlineThroughBlocks;
 
+    private String generationMode;
     private boolean selectionLimitEnabled;
     private int maxSelectionWidth;
     private int maxSelectionHeight;
@@ -206,25 +212,29 @@ public class PromptCraftSettingsScreen extends Screen {
         int menuY = centerY - 75;
         int contentX = centerX - 30;
         int contentY = menuY;
+        int createY = menuY - 25;
 
-        promptField = new net.minecraft.client.gui.widget.EditBoxWidget(this.textRenderer, contentX - 5, contentY, 190, 95, Text.literal("Prompt"), Text.literal(""));
+        promptField = new net.minecraft.client.gui.widget.EditBoxWidget(this.textRenderer, contentX - 5, createY, 190, 95, Text.literal("Prompt"), Text.literal(""));
         promptField.setText(PromptDraftState.get());
         this.addDrawableChild(promptField);
 
-        generateButton = new FlatButton(contentX - 5, contentY + 100, 90, 20, Text.literal("Generate"), b -> sendGuiActionKeepOpen("generate", promptField.getText()));
+        generateButton = new FlatButton(contentX - 5, createY + 100, 90, 20, Text.literal("Generate"), b -> sendGuiActionKeepOpen("generate", promptField.getText()));
         this.addDrawableChild(generateButton);
 
-        editButton = new FlatButton(contentX + 95, contentY + 100, 90, 20, Text.literal("Edit"), b -> sendGuiActionKeepOpen("edit", promptField.getText()));
+        editButton = new FlatButton(contentX + 95, createY + 100, 90, 20, Text.literal("Edit"), b -> sendGuiActionKeepOpen("edit", promptField.getText()));
         this.addDrawableChild(editButton);
 
-        undoButton = new FlatButton(contentX - 5, contentY + 125, 190, 20, Text.literal("Undo (Clear)"), b -> sendGuiAction("undo", ""));
+        undoButton = new FlatButton(contentX - 5, createY + 125, 190, 20, Text.literal("Undo (Clear)"), b -> sendGuiAction("undo", ""));
         this.addDrawableChild(undoButton);
 
-        backButton = new FlatButton(contentX - 5, contentY + 150, 90, 20, Text.literal("<< Back"), b -> sendGuiAction("back", ""));
+        backButton = new FlatButton(contentX - 5, createY + 150, 90, 20, Text.literal("<< Back"), b -> sendGuiAction("back", ""));
         this.addDrawableChild(backButton);
 
-        nextButton = new FlatButton(contentX + 95, contentY + 150, 90, 20, Text.literal("Next >>"), b -> sendGuiAction("next", ""));
+        nextButton = new FlatButton(contentX + 95, createY + 150, 90, 20, Text.literal("Next >>"), b -> sendGuiAction("next", ""));
         this.addDrawableChild(nextButton);
+
+        modeButton = new FlatButton(contentX - 5, createY + 175, 190, 20, Text.literal(getModeDisplayName(dev.promptcraft.config.PromptCraftConfigManager.get().generationMode)), b -> modeMenuOpen = !modeMenuOpen);
+        this.addDrawableChild(modeButton);
 
         providerButton = new ProviderSelectButton(
                 contentX - 5,
@@ -433,6 +443,7 @@ public class PromptCraftSettingsScreen extends Screen {
         if (undoButton != null) { undoButton.visible = isCreate; undoButton.active = isCreate; }
         if (backButton != null) { backButton.visible = isCreate; backButton.active = isCreate; }
         if (nextButton != null) { nextButton.visible = isCreate; nextButton.active = isCreate; }
+        if (modeButton != null) { modeButton.visible = isCreate; modeButton.active = isCreate; }
 
         if (providerButton != null) { providerButton.visible = isApi; providerButton.active = isApi; }
         if (apiKeyField != null) { apiKeyField.visible = isApi; apiKeyField.active = isApi; }
@@ -695,11 +706,13 @@ public class PromptCraftSettingsScreen extends Screen {
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            if (modeMenuOpen) { modeMenuOpen = false; return true; }
             if (modelMenuOpen) { modelMenuOpen = false; return true; }
             if (providerMenuOpen) { providerMenuOpen = false; return true; }
             if (langMenuOpen) { langMenuOpen = false; return true; }
         }
 
+        if (modeMenuOpen) return true;
         if (providerMenuOpen || langMenuOpen) return true;
 
         if (modelMenuOpen) {
@@ -761,6 +774,7 @@ public class PromptCraftSettingsScreen extends Screen {
             }
         }
 
+        if (modeMenuOpen) return handleModeMenuClick(mouseX, mouseY);
         if (providerMenuOpen) return handleProviderMenuClick(mouseX, mouseY);
         if (modelMenuOpen) return handleModelMenuClick(mouseX, mouseY, button);
         if (langMenuOpen) return handleLangMenuClick(mouseX, mouseY);
@@ -1043,6 +1057,7 @@ public class PromptCraftSettingsScreen extends Screen {
 
         super.render(context, mouseX, mouseY, delta);
 
+        if (modeMenuOpen) renderModeMenu(context);
         if (providerMenuOpen) renderProviderMenu(context);
         if (langMenuOpen) renderLangMenu(context);
         if (modelMenuOpen) renderModelMenu(context, mouseX, mouseY, delta);
@@ -1402,6 +1417,73 @@ public class PromptCraftSettingsScreen extends Screen {
         }
 
         return ((int) (r * 255) << 16) | ((int) (g * 255) << 8) | (int) (b * 255);
+    }
+
+    private String getModeDisplayName(String code) {
+        boolean isRu = "ru".equals(language);
+        if ("free".equals(code)) return isRu ? "Режим: Свободный (от ИИ)" : "Mode: AI Free Area";
+        return isRu ? "Режим: Ручной выбор" : "Mode: Manual Area";
+    }
+
+    private boolean handleModeMenuClick(double mouseX, double mouseY) {
+        int overlayW = 200;
+        int overlayH = 90;
+        int ox = this.width / 2 - overlayW / 2;
+        int oy = this.height / 2 - overlayH / 2;
+
+        int closeX = ox + overlayW - 22;
+        int closeY = oy + 5;
+
+        if (mouseX >= closeX && mouseX <= closeX + 18 && mouseY >= closeY && mouseY <= closeY + 14) {
+            modeMenuOpen = false;
+            return true;
+        }
+
+        String[] options = "ru".equals(language) ? MODE_OPTIONS_RU : MODE_OPTIONS;
+        for (int i = 0; i < options.length; i++) {
+            int itemY = oy + 30 + i * 22;
+            if (mouseX >= ox + 10 && mouseX <= ox + overlayW - 10 && mouseY >= itemY && mouseY <= itemY + 20) {
+                String code = MODE_CODES[i];
+                generationMode = code;
+                dev.promptcraft.config.PromptCraftConfigManager.get().generationMode = code;
+                modeButton.setMessage(Text.literal(getModeDisplayName(code)));
+                modeMenuOpen = false;
+                markDirty();
+                return true;
+            }
+        }
+
+        if (mouseX < ox || mouseX > ox + overlayW || mouseY < oy || mouseY > oy + overlayH) {
+            modeMenuOpen = false;
+        }
+        return true;
+    }
+
+    private void renderModeMenu(DrawContext context) {
+        context.getMatrices().push();
+        context.getMatrices().translate(0.0f, 0.0f, 400.0f);
+
+        int overlayW = 200;
+        int overlayH = 90;
+        int ox = this.width / 2 - overlayW / 2;
+        int oy = this.height / 2 - overlayH / 2;
+
+        renderOverlayBase(context, ox, oy, overlayW, overlayH);
+        context.drawTextWithShadow(this.textRenderer, t("Select Mode", "Выберите режим"), ox + 10, oy + 6, 0xFFFFFF);
+        renderCloseButton(context, ox + overlayW - 22, oy + 5);
+
+        int themeColorInt = parseThemeColor(themeColor);
+        String[] options = "ru".equals(language) ? MODE_OPTIONS_RU : MODE_OPTIONS;
+
+        for (int i = 0; i < options.length; i++) {
+            int itemY = oy + 30 + i * 22;
+            boolean selected = MODE_CODES[i].equals(dev.promptcraft.config.PromptCraftConfigManager.get().generationMode);
+
+            context.fill(ox + 10, itemY, ox + overlayW - 10, itemY + 20, selected ? themeColorInt : 0xFF2D2D2D);
+            context.drawText(this.textRenderer, options[i], ox + 16, itemY + 6, selected ? 0x000000 : 0xD2D2D2, false);
+        }
+
+        context.getMatrices().pop();
     }
 
     private class ProviderSelectButton extends FlatButton {

@@ -1,5 +1,7 @@
 package dev.promptcraft.session;
 
+import dev.promptcraft.structure.PromptCraftStructure;
+
 import java.io.Closeable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -13,6 +15,10 @@ public class GenerationSession {
 
     private volatile CompletableFuture<?> httpFuture;
     private volatile Closeable activeStream;
+
+    // --- Состояние свободного (AI-выбранного) размещения ---
+    private volatile boolean ghostPending = false;
+    private volatile PromptCraftStructure pendingStructure;
 
     public boolean isCancelled() {
         return cancelled.get();
@@ -72,5 +78,21 @@ public class GenerationSession {
             } catch (Exception ignored) {
             }
         }
+    }
+
+    public void setGhostPending(boolean value) {
+        this.ghostPending = value;
+    }
+
+    public boolean isGhostPending() {
+        return ghostPending;
+    }
+
+    public void setPendingStructure(PromptCraftStructure structure) {
+        this.pendingStructure = structure;
+    }
+
+    public PromptCraftStructure getPendingStructure() {
+        return pendingStructure;
     }
 }

@@ -7,6 +7,8 @@ public class PromptCraftConfig {
     public String accessMode = "admins_only";
     public String themeColor = "#17b95f"; // Default neon green
     public String language = "en"; // en or ru
+    
+    public String generationMode = "manual"; // "manual" или "free"
 
     public boolean showProcessMessages = true;
     public boolean enableDestructionAnimation = true;
@@ -16,11 +18,10 @@ public class PromptCraftConfig {
     public float selectionFillOpacity = 0.075f;
     public boolean selectionOutlineThroughBlocks = false;
 
-    public boolean selectionLimitEnabled = true;
+    public boolean selectionLimitEnabled = false;
     public int maxSelectionWidth = 64;
     public int maxSelectionHeight = 64;
     public int maxSelectionDepth = 64;
-    public int maxRepairAttempts = 3;
 
     public boolean isAccessEveryone() {
         return "everyone".equalsIgnoreCase(accessMode);

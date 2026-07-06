@@ -8,6 +8,8 @@ import dev.promptcraft.selection.PlayerSelection;
 import dev.promptcraft.session.GenerationSession;
 import dev.promptcraft.session.PendingPrompt;
 import dev.promptcraft.session.PromptSessionManager;
+import dev.promptcraft.structure.PromptCraftStructure;
+import dev.promptcraft.structure.StructureRotationUtil;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.PacketByteBuf;
@@ -15,6 +17,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -26,6 +29,9 @@ public class PromptCraftNetworking {
     public static final Identifier REQUEST_OPEN_GUI_PACKET = new Identifier(PromptCraftMod.MOD_ID, "request_open_gui");
     public static final Identifier GUI_ACTION_PACKET = new Identifier(PromptCraftMod.MOD_ID, "gui_action");
     public static final Identifier AI_STREAM_PACKET = new Identifier(PromptCraftMod.MOD_ID, "ai_stream");
+    public static final Identifier START_FREE_PLACEMENT_PACKET = new Identifier(PromptCraftMod.MOD_ID, "start_free_placement");
+    public static final Identifier CANCEL_FREE_PLACEMENT_PACKET = new Identifier(PromptCraftMod.MOD_ID, "cancel_free_placement");
+    public static final Identifier CONFIRM_PLACEMENT_PACKET = new Identifier(PromptCraftMod.MOD_ID, "confirm_placement");
 
     public static void registerServerReceivers() {
         ServerPlayNetworking.registerGlobalReceiver(SAVE_GUI_PACKET, (server, player, handler, buf, responseSender) -> {
@@ -86,9 +92,15 @@ public class PromptCraftNetworking {
             String promptText = buf.readString();
 
             server.execute(() -> {
-                if (!dev.promptcraft.PromptCraftCommands.hasAccess(player)) return;
+                boolean isGenOrEdit = "generate".equals(action) || "edit".equals(action);
+
+                if (!dev.promptcraft.PromptCraftCommands.hasAccess(player)) {
+                    if (isGenOrEdit) sendAiStreamEvent(player, "cancelled", "");
+                    return;
+                }
                 if (!player.isCreative()) {
                     player.sendMessage(Text.literal("You must be in creative mode.").formatted(Formatting.RED), false);
+                    if (isGenOrEdit) sendAiStreamEvent(player, "cancelled", "");
                     return;
                 }
 
@@ -98,29 +110,40 @@ public class PromptCraftNetworking {
                         return;
                     }
 
-                    PlayerSelection selection = dev.promptcraft.selection.SelectionManager.get(player);
-                    if (!selection.isComplete()) {
-                        player.sendMessage(Text.literal("You must select an area first!").formatted(Formatting.RED), false);
-                        return;
-                    }
-                    if (!dev.promptcraft.selection.SelectionManager.isWithinLimit(selection)) {
-                        player.sendMessage(Text.literal("Selection is too large! Check /pmenu -> Limits.").formatted(Formatting.RED), false);
-                        return;
-                    }
+                    PromptCraftConfig config = PromptCraftConfigManager.get();
+                    boolean isFreeMode = "free".equals(config.generationMode);
 
-                    PendingPrompt prompt = new PendingPrompt(promptText, selection.getMin(), selection.getMax(), selection.getWidth(), selection.getHeight(), selection.getDepth());
-                    PromptSessionManager.setLast(player, prompt);
-                    executeBuildProcess(player, prompt);
+                    if (isFreeMode) {
+                        // Реальный размер зоны здесь ещё неизвестен - его определит сам ИИ.
+                        // Плейсхолдер (0,0,0) будет заменён на настоящие координаты после
+                        // подтверждения размещения (см. CONFIRM_PLACEMENT_PACKET ниже).
+                        PendingPrompt prompt = new PendingPrompt(promptText, BlockPos.ORIGIN, BlockPos.ORIGIN, 0, 0, 0);
+                        PromptSessionManager.setLast(player, prompt);
+                        executeFreeBuildProcess(player, prompt);
+                    } else {
+                        PlayerSelection selection = dev.promptcraft.selection.SelectionManager.get(player);
+                        if (!selection.isComplete()) {
+                            player.sendMessage(Text.literal("You must select an area first!").formatted(Formatting.RED), false);
+                            sendAiStreamEvent(player, "cancelled", "");
+                            return;
+                        }
+
+                        PendingPrompt prompt = new PendingPrompt(promptText, selection.getMin(), selection.getMax(), selection.getWidth(), selection.getHeight(), selection.getDepth());
+                        PromptSessionManager.setLast(player, prompt);
+                        executeBuildProcess(player, prompt);
+                    }
 
                 } else if ("edit".equals(action)) {
                     if (PromptSessionManager.isGenerating(player)) {
                         player.sendMessage(Text.literal("A generation is already in progress.").formatted(Formatting.RED), false);
+                        sendAiStreamEvent(player, "cancelled", "");
                         return;
                     }
 
                     var lastOpt = PromptSessionManager.getLast(player);
                     if (lastOpt.isEmpty()) {
                         player.sendMessage(Text.literal("No previous prompt to edit!").formatted(Formatting.RED), false);
+                        sendAiStreamEvent(player, "cancelled", "");
                         return;
                     }
                     PendingPrompt last = lastOpt.get();
@@ -129,10 +152,21 @@ public class PromptCraftNetworking {
                     PromptSessionManager.setLast(player, newPrompt);
                     executeBuildProcess(player, newPrompt);
 
-                } else if ("undo".equals(action) || "back".equals(action)) {
+                } else if ("undo".equals(action)) {
                     var activeSession = PromptSessionManager.getActiveGeneration(player);
                     if (activeSession.isPresent() && !activeSession.get().isCancelled()) {
                         cancelGeneration(player, activeSession.get());
+                        return;
+                    }
+
+                    if (dev.promptcraft.structure.HistoryManager.undo(player)) {
+                        player.sendMessage(Text.literal("Step back successful.").formatted(Formatting.GREEN), false);
+                    } else {
+                        player.sendMessage(Text.literal("Nothing to undo.").formatted(Formatting.RED), false);
+                    }
+                } else if ("back".equals(action)) {
+                    if (PromptSessionManager.isGenerating(player)) {
+                        player.sendMessage(Text.literal("Cannot go back while generating.").formatted(Formatting.RED), false);
                         return;
                     }
 
@@ -153,6 +187,50 @@ public class PromptCraftNetworking {
                         player.sendMessage(Text.literal("Nothing to redo.").formatted(Formatting.RED), false);
                     }
                 }
+            });
+        });
+
+        ServerPlayNetworking.registerGlobalReceiver(CONFIRM_PLACEMENT_PACKET, (server, player, handler, buf, responseSender) -> {
+            BlockPos anchor = buf.readBlockPos();
+            int rotationSteps = buf.readInt();
+
+            server.execute(() -> {
+                if (!dev.promptcraft.PromptCraftCommands.hasAccess(player) || !player.isCreative()) return;
+
+                var sessionOpt = PromptSessionManager.getActiveGeneration(player);
+                if (sessionOpt.isEmpty() || !sessionOpt.get().isGhostPending()) return;
+
+                GenerationSession session = sessionOpt.get();
+                PromptCraftStructure structure = session.getPendingStructure();
+
+                if (structure == null) {
+                    PromptSessionManager.clearGeneration(player);
+                    return;
+                }
+
+                PromptCraftStructure rotated = StructureRotationUtil.rotate(structure, rotationSteps);
+                PromptCraftStructure.Bounds bounds = rotated.computeBounds();
+
+                BlockPos min = anchor.add(bounds.minX(), bounds.minY(), bounds.minZ());
+                BlockPos max = anchor.add(bounds.maxX(), bounds.maxY(), bounds.maxZ());
+
+                session.setGhostPending(false);
+                session.setPendingStructure(null);
+
+                PromptSessionManager.getLast(player).ifPresent(last -> {
+                    PendingPrompt updated = new PendingPrompt(
+                            last.getPrompt(), min, max, bounds.width(), bounds.height(), bounds.depth()
+                    );
+                    PromptSessionManager.setLast(player, updated);
+                });
+
+                player.sendMessage(Text.literal("Placing structure...").formatted(Formatting.YELLOW), false);
+
+                dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.DestructionTask(player, min, max, session, () -> {
+                    if (session.isCancelled()) return;
+                    player.sendMessage(Text.literal("Area cleared. Building...").formatted(Formatting.GREEN), false);
+                    dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.BuildTask(player, min, rotated, session));
+                }));
             });
         });
     }
@@ -195,10 +273,6 @@ public class PromptCraftNetworking {
         ServerPlayNetworking.send(player, OPEN_GUI_PACKET, buf);
     }
 
-    /**
-     * Отправляет клиенту событие о состоянии текущего потока генерации ИИ.
-     * eventType: "start", "reasoning", "done", "error", "cancelled".
-     */
     public static void sendAiStreamEvent(ServerPlayerEntity player, String eventType, String payload) {
         PacketByteBuf buf = PacketByteBufs.create();
         buf.writeString(eventType);
@@ -231,12 +305,64 @@ public class PromptCraftNetworking {
         }));
     }
 
-    /** Отменяет генерацию в процессе и откатывает мир к состоянию до её начала. */
+    private static void executeFreeBuildProcess(ServerPlayerEntity player, PendingPrompt prompt) {
+        GenerationSession session = PromptSessionManager.startGeneration(player);
+        PromptCraftConfig config = PromptCraftConfigManager.get();
+
+        player.sendMessage(Text.literal("Contacting AI for free placement...").formatted(Formatting.AQUA), false);
+
+        dev.promptcraft.ai.AiClient.requestFreeBuild(
+                player,
+                prompt.getPrompt(),
+                config.selectionLimitEnabled,
+                config.maxSelectionWidth,
+                config.maxSelectionHeight,
+                config.maxSelectionDepth,
+                session
+        ).thenAccept(structure -> {
+            if (session.isCancelled()) return;
+
+            if (structure != null && structure.operations != null && !structure.operations.isEmpty() && player.getServer() != null) {
+                player.getServer().execute(() -> {
+                    if (session.isCancelled()) return;
+
+                    session.setPendingStructure(structure);
+                    session.setGhostPending(true);
+
+                    player.sendMessage(Text.literal("AI response received! Position the preview and confirm placement.").formatted(Formatting.GREEN), false);
+
+                    PacketByteBuf buf = PacketByteBufs.create();
+                    buf.writeString(new com.google.gson.Gson().toJson(structure));
+                    ServerPlayNetworking.send(player, START_FREE_PLACEMENT_PACKET, buf);
+
+                    // Сессия намеренно НЕ очищается здесь: призрак ещё не размещён,
+                    // и Undo должен иметь возможность его отменить (см. cancelGeneration).
+                    sendAiStreamEvent(player, "done", "");
+                });
+            } else {
+                if (player.getServer() != null) {
+                    player.getServer().execute(() -> {
+                        if (!session.isCancelled()) {
+                            player.sendMessage(Text.literal("AI returned an empty structure.").formatted(Formatting.RED), false);
+                        }
+                        PromptSessionManager.clearGeneration(player);
+                    });
+                } else {
+                    PromptSessionManager.clearGeneration(player);
+                }
+            }
+        });
+    }
+
     private static void cancelGeneration(ServerPlayerEntity player, GenerationSession session) {
         session.cancel();
         session.abortHttpRequest();
 
-        if (session.isDestructionComplete()) {
+        if (session.isGhostPending()) {
+            session.setGhostPending(false);
+            session.setPendingStructure(null);
+            ServerPlayNetworking.send(player, CANCEL_FREE_PLACEMENT_PACKET, PacketByteBufs.create());
+        } else if (session.isDestructionComplete()) {
             dev.promptcraft.structure.HistoryManager.undo(player);
         }
 

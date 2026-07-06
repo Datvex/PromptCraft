@@ -4,19 +4,15 @@ import dev.promptcraft.network.PromptCraftNetworking;
 import dev.promptcraft.session.GenerationSession;
 import dev.promptcraft.session.PromptSessionManager;
 import dev.promptcraft.structure.PromptCraftStructure;
-import net.minecraft.block.Block;
+import dev.promptcraft.structure.StructureBlockCodec;
 import net.minecraft.block.BlockState;
-import net.minecraft.registry.Registries;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.state.property.Property;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.LinkedHashSet;
-import java.util.Optional;
 import java.util.Set;
 
 public class BuildTask implements Task {
@@ -66,36 +62,13 @@ public class BuildTask implements Task {
     private void executeOp(PromptCraftStructure.Operation op) {
         if (op.block == null) return;
 
-        String[] parts = op.block.split("\\[");
-        String blockId = parts[0];
-
-        Identifier id;
-        try {
-            id = new Identifier(blockId);
-        } catch (Exception e) {
-            unknownBlocks.add(blockId);
+        var stateOpt = StructureBlockCodec.parse(op.block);
+        if (stateOpt.isEmpty()) {
+            unknownBlocks.add(op.block.split("\\[")[0]);
             return;
         }
 
-        Optional<Block> blockOpt = Registries.BLOCK.getOrEmpty(id);
-        if (blockOpt.isEmpty()) {
-            unknownBlocks.add(blockId);
-            return;
-        }
-
-        Block block = blockOpt.get();
-        BlockState state = block.getDefaultState();
-
-        if (parts.length > 1) {
-            String props = parts[1].replace("]", "");
-            for (String prop : props.split(",")) {
-                String[] kv = prop.split("=");
-                if (kv.length == 2) {
-                    state = applyProperty(state, kv[0], kv[1]);
-                }
-            }
-        }
-
+        BlockState state = stateOpt.get();
         int flags = BlockPlacementUtil.flagsFor(state);
 
         if ("place".equals(op.type) && op.pos != null && op.pos.length == 3) {
@@ -117,18 +90,5 @@ public class BuildTask implements Task {
                 }
             }
         }
-    }
-
-    private BlockState applyProperty(BlockState state, String key, String value) {
-        for (Property<?> prop : state.getProperties()) {
-            if (prop.getName().equals(key)) {
-                return parseAndSet(state, prop, value);
-            }
-        }
-        return state;
-    }
-
-    private <T extends Comparable<T>> BlockState parseAndSet(BlockState state, Property<T> prop, String value) {
-        return prop.parse(value).map(t -> state.with(prop, t)).orElse(state);
     }
 }

@@ -1,5 +1,7 @@
 package dev.promptcraft.config;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.util.HashMap;
@@ -10,37 +12,42 @@ public class PromptCraftEnv {
     private static final String[] PROVIDERS = {"nvidia", "openai", "anthropic", "deepseek", "gemini", "xai", "openrouter"};
 
     public static String getApiKey(String provider) {
-        try {
-            Properties props = new Properties();
-            if (Files.exists(PromptCraftConfigManager.getEnvPath())) {
-                props.load(Files.newInputStream(PromptCraftConfigManager.getEnvPath()));
-            }
-            return props.getProperty(provider.toUpperCase() + "_API_KEY", "").trim();
-        } catch (Exception e) {
-            return "";
-        }
+        Properties props = loadProperties();
+        return props.getProperty(provider.toUpperCase() + "_API_KEY", "").trim();
     }
 
     public static Map<String, String> getAllApiKeys() {
+        Properties props = loadProperties();
         Map<String, String> keys = new HashMap<>();
         for (String p : PROVIDERS) {
-            keys.put(p, getApiKey(p));
+            keys.put(p, props.getProperty(p.toUpperCase() + "_API_KEY", "").trim());
         }
         return keys;
     }
 
     public static void saveApiKeys(Map<String, String> keys) {
+        Properties props = loadProperties();
+
+        for (Map.Entry<String, String> entry : keys.entrySet()) {
+            props.setProperty(entry.getKey().toUpperCase() + "_API_KEY", entry.getValue());
+        }
+
+        try (OutputStream out = Files.newOutputStream(PromptCraftConfigManager.getEnvPath())) {
+            props.store(out, "PromptCraft API secrets");
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static Properties loadProperties() {
+        Properties props = new Properties();
         try {
-            Properties props = new Properties();
             if (Files.exists(PromptCraftConfigManager.getEnvPath())) {
-                props.load(Files.newInputStream(PromptCraftConfigManager.getEnvPath()));
+                try (InputStream in = Files.newInputStream(PromptCraftConfigManager.getEnvPath())) {
+                    props.load(in);
+                }
             }
-            for (Map.Entry<String, String> entry : keys.entrySet()) {
-                props.setProperty(entry.getKey().toUpperCase() + "_API_KEY", entry.getValue());
-            }
-            try (OutputStream out = Files.newOutputStream(PromptCraftConfigManager.getEnvPath())) {
-                props.store(out, "PromptCraft API secrets");
-            }
-        } catch (Exception ignored) {}
+        } catch (IOException ignored) {
+        }
+        return props;
     }
 }
