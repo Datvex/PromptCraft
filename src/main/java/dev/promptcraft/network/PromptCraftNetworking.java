@@ -229,7 +229,7 @@ public class PromptCraftNetworking {
                 dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.DestructionTask(player, min, max, session, () -> {
                     if (session.isCancelled()) return;
                     player.sendMessage(Text.literal("Area cleared. Building...").formatted(Formatting.GREEN), false);
-                    dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.BuildTask(player, min, rotated, session));
+                    dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.BuildTask(player, anchor, rotated, session));
                 }));
             });
         });

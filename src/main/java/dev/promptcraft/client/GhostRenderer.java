@@ -77,6 +77,13 @@ public final class GhostRenderer {
                 anchor.getZ() + local.getZ() - cam.z
             );
 
+            // Чуть раздуваем блок вокруг центра, чтобы его грани не совпадали
+            // в одной плоскости с блоками мира -> убирает z-fighting/мерцание.
+            float s = 1.01f;
+            matrices.translate(0.5, 0.5, 0.5);
+            matrices.scale(s, s, s);
+            matrices.translate(-0.5, -0.5, -0.5);
+
             RenderLayer layer = RenderLayers.getEntityBlockLayer(state, false);
             VertexConsumer vc = immediate.getBuffer(layer);
             brm.getModelRenderer().render(
@@ -114,7 +121,7 @@ public final class GhostRenderer {
         Box box = new Box(
             anchor.getX() + minX, anchor.getY() + minY, anchor.getZ() + minZ,
             anchor.getX() + maxX + 1, anchor.getY() + maxY + 1, anchor.getZ() + maxZ + 1
-        ).offset(-cam.x, -cam.y, -cam.z);
+        ).offset(-cam.x, -cam.y, -cam.z).expand(0.02);
 
         Matrix4f m = context.matrixStack().peek().getPositionMatrix();
         var tess = net.minecraft.client.render.Tessellator.getInstance();

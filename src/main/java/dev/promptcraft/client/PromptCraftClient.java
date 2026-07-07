@@ -31,6 +31,8 @@ public class PromptCraftClient implements ClientModInitializer {
     private static BlockPos firstPos = null;
     private static BlockPos secondPos = null;
 
+    private static boolean scrollHookInstalled = false;
+
     private static KeyBinding rotateGhostKey;
     private static KeyBinding confirmPlacementKey;
 
@@ -58,6 +60,8 @@ public class PromptCraftClient implements ClientModInitializer {
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            installScrollHookIfNeeded(client);
+
             while (openMenuKey.wasPressed()) {
                 if (client.player != null && client.currentScreen == null) {
                     ClientPlayNetworking.send(PromptCraftNetworking.REQUEST_OPEN_GUI_PACKET, PacketByteBufs.create());
@@ -291,6 +295,26 @@ public class PromptCraftClient implements ClientModInitializer {
             RenderSystem.disableBlend();
             RenderSystem.enableDepthTest();
         });
+    }
+
+    private static void installScrollHookIfNeeded(MinecraftClient client) {
+        if (scrollHookInstalled || client.getWindow() == null) return;
+        long handle = client.getWindow().getHandle();
+
+        // Чейнимся к прежнему колбэку Minecraft, чтобы вне режима предпросмотра
+        // колесо работало штатно (хотбар и т.д.).
+        org.lwjgl.glfw.GLFWScrollCallbackI[] previous = new org.lwjgl.glfw.GLFWScrollCallbackI[1];
+        org.lwjgl.glfw.GLFWScrollCallback ours = org.lwjgl.glfw.GLFWScrollCallback.create((win, dx, dy) -> {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (GhostPreviewState.isActive() && mc.currentScreen == null) {
+                GhostPreviewState.addDistance(dy * 2.0); // вверх = дальше, вниз = ближе
+                return; // не листаем хотбар во время позиционирования
+            }
+            if (previous[0] != null) previous[0].invoke(win, dx, dy);
+        });
+
+        previous[0] = org.lwjgl.glfw.GLFW.glfwSetScrollCallback(handle, ours);
+        scrollHookInstalled = true;
     }
 
     private void drawFilledBox(Matrix4f matrix, BufferBuilder buffer, Box box, float r, float g, float b, float a) {

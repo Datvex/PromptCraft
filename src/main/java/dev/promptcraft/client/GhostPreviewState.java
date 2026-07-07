@@ -5,14 +5,15 @@ import dev.promptcraft.structure.StructureFlattener;
 import dev.promptcraft.structure.StructureRotationUtil;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.Map;
 
 public final class GhostPreviewState {
+    private static final double MIN_DISTANCE = 2.0;
+    private static final double MAX_DISTANCE = 160.0;
+
     private static volatile boolean active = false;
     private static PromptCraftStructure originalStructure;
     private static int rotationSteps = 0;
@@ -21,10 +22,13 @@ public final class GhostPreviewState {
     private static long cacheVersion = -1;
     private static long currentVersion = 0;
 
-    // Кэш геометрии текущего поворота (чтобы не сканировать все блоки каждый кадр).
     private static int cachedCenterLocalX = 0;
     private static int cachedCenterLocalZ = 0;
     private static int cachedMinY = 0;
+    private static int cachedHalfX = 0;
+    private static int cachedHalfZ = 0;
+
+    private static volatile double previewDistance = 8.0;
 
     private GhostPreviewState() {}
 
@@ -36,6 +40,8 @@ public final class GhostPreviewState {
         cachedFlatBlocks = null;
         currentVersion++;
         active = true;
+        getFlattenedRotatedBlocks();
+        previewDistance = clampDistance(Math.max(cachedHalfX, cachedHalfZ) + 8.0);
     }
 
     public static void cancel() {
@@ -54,37 +60,36 @@ public final class GhostPreviewState {
 
     public static int getRotationSteps() { return rotationSteps; }
 
+    /** Приблизить/отдалить предпросмотр колесиком. delta>0 = ближе к игроку. */
+    public static void addDistance(double delta) {
+        if (!active) return;
+        previewDistance = clampDistance(previewDistance + delta);
+    }
+
+    private static double clampDistance(double d) {
+        return Math.max(MIN_DISTANCE, Math.min(MAX_DISTANCE, d));
+    }
+
     /**
-     * Мировые координаты локального угла (0,0,0) структуры.
-     * Структура центрируется по горизонтали на блоке, куда смотрит игрок,
-     * и ставится основанием на него. Если игрок смотрит в пустоту -
-     * проецируем на несколько блоков вперёд по направлению взгляда.
+     * Локальный угол (0,0,0) структуры. Точка проецируется вдоль взгляда игрока
+     * на дистанцию previewDistance -> следует по горизонтали и высоте, колесо зумит.
      */
     public static BlockPos getCurrentAnchor() {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return BlockPos.ORIGIN;
 
-        getFlattenedRotatedBlocks(); // гарантируем актуальный кэш bounds
-        BlockPos target = resolveTargetBlock(client);
+        getFlattenedRotatedBlocks();
+
+        Vec3d eye = client.player.getEyePos();
+        Vec3d look = client.player.getRotationVec(1.0f);
+        Vec3d point = eye.add(look.multiply(previewDistance));
+        BlockPos target = BlockPos.ofFloored(point);
 
         return new BlockPos(
             target.getX() - cachedCenterLocalX,
             target.getY() - cachedMinY,
             target.getZ() - cachedCenterLocalZ
         );
-    }
-
-    private static BlockPos resolveTargetBlock(MinecraftClient client) {
-        HitResult hit = client.crosshairTarget;
-        if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
-            BlockHitResult bhr = (BlockHitResult) hit;
-            return bhr.getBlockPos().up(); // ставим на верх блока, на который смотрим
-        }
-        Vec3d eye = client.player.getEyePos();
-        Vec3d look = client.player.getRotationVec(1.0f);
-        double distance = 8.0;
-        Vec3d projected = eye.add(look.x * distance, look.y * distance, look.z * distance);
-        return BlockPos.ofFloored(projected);
     }
 
     public static Map<BlockPos, BlockState> getFlattenedRotatedBlocks() {
@@ -101,6 +106,7 @@ public final class GhostPreviewState {
     private static void recomputeBounds() {
         if (cachedFlatBlocks == null || cachedFlatBlocks.isEmpty()) {
             cachedCenterLocalX = cachedCenterLocalZ = cachedMinY = 0;
+            cachedHalfX = cachedHalfZ = 0;
             return;
         }
         int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
@@ -113,5 +119,7 @@ public final class GhostPreviewState {
         cachedCenterLocalX = (minX + maxX) / 2;
         cachedCenterLocalZ = (minZ + maxZ) / 2;
         cachedMinY = minY;
+        cachedHalfX = (maxX - minX) / 2;
+        cachedHalfZ = (maxZ - minZ) / 2;
     }
 }
