@@ -4,15 +4,19 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.block.BlockRenderManager;
 import net.minecraft.client.render.LightmapTextureManager;
 import net.minecraft.client.render.OverlayTexture;
 import net.minecraft.client.render.RenderLayer;
+import net.minecraft.client.render.RenderLayers;
+import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
+import net.minecraft.client.render.block.BlockRenderManager;
+import net.minecraft.client.render.model.BakedModel;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.random.Random;
 import org.joml.Matrix4f;
 
 import java.util.ArrayList;
@@ -20,8 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 public final class GhostRenderer {
-    private static final int MAX_DETAILED_BLOCKS = 20000;
-    private static final float GHOST_ALPHA = 0.6f;
+    private static final int MAX_DETAILED_BLOCKS = 40000;
 
     private GhostRenderer() {}
 
@@ -34,11 +37,9 @@ public final class GhostRenderer {
         if (blocks.isEmpty()) return;
 
         BlockPos anchor = GhostPreviewState.getCurrentAnchor();
-        Vec3d cameraPos = context.camera().getPos();
+        Vec3d cam = context.camera().getPos();
 
-        // Рисуем только видимую оболочку: пропускаем воздух и блоки, окружённые
-        // со всех 6 сторон. Это убирает "кашу" из наложенных полупрозрачных
-        // граней и сильно разгружает GPU на больших структурах.
+        // Только видимая оболочка: воздух и полностью замурованные блоки не рисуем.
         List<Map.Entry<BlockPos, BlockState>> visible = new ArrayList<>();
         for (Map.Entry<BlockPos, BlockState> e : blocks.entrySet()) {
             if (e.getValue().isAir()) continue;
@@ -48,101 +49,102 @@ public final class GhostRenderer {
         if (visible.isEmpty()) return;
 
         if (visible.size() > MAX_DETAILED_BLOCKS) {
-            renderSimplifiedBox(context, blocks, anchor, cameraPos);
-        } else {
-            renderDetailed(client, context, visible, anchor, cameraPos);
+            renderBox(context, blocks, anchor, cam, 0.35f, 0.85f, 1.0f, 0.30f);
+            return;
         }
-    }
 
-    private static boolean isEnclosed(BlockPos p, Map<BlockPos, BlockState> blocks) {
-        return present(blocks, p.up()) && present(blocks, p.down())
-            && present(blocks, p.north()) && present(blocks, p.south())
-            && present(blocks, p.east()) && present(blocks, p.west());
-    }
-
-    private static boolean present(Map<BlockPos, BlockState> blocks, BlockPos p) {
-        BlockState s = blocks.get(p);
-        return s != null && !s.isAir();
-    }
-
-    private static void renderDetailed(MinecraftClient client, WorldRenderContext context,
-                                       List<Map.Entry<BlockPos, BlockState>> visible,
-                                       BlockPos anchor, Vec3d cameraPos) {
-        MatrixStack matrices = context.matrixStack();
-        BlockRenderManager renderManager = client.getBlockRenderManager();
-        int light = LightmapTextureManager.pack(15, 15);
-
+        BlockRenderManager brm = client.getBlockRenderManager();
         VertexConsumerProvider.Immediate immediate = client.getBufferBuilders().getEntityVertexConsumers();
-        VertexConsumerProvider ghostProvider = new GhostVertexConsumerProvider(immediate, GHOST_ALPHA);
+        int light = LightmapTextureManager.pack(15, 15);
+        MatrixStack matrices = context.matrixStack();
+        Random random = Random.create();
 
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
+        // Непрозрачно, с отсечением задних граней и записью глубины -> настоящий
+        // макет из текстур блоков. Никакого наложения полупрозрачных слоёв.
         RenderSystem.enableDepthTest();
-        RenderSystem.depthMask(false);
-        RenderSystem.enableCull(); // <- ключевой фикс: отсекаем задние грани
+        RenderSystem.enableCull();
+        RenderSystem.depthMask(true);
 
         for (Map.Entry<BlockPos, BlockState> entry : visible) {
             BlockState state = entry.getValue();
             BlockPos local = entry.getKey();
+            BakedModel model = brm.getModel(state);
 
             matrices.push();
             matrices.translate(
-                anchor.getX() + local.getX() - cameraPos.x,
-                anchor.getY() + local.getY() - cameraPos.y,
-                anchor.getZ() + local.getZ() - cameraPos.z
+                anchor.getX() + local.getX() - cam.x,
+                anchor.getY() + local.getY() - cam.y,
+                anchor.getZ() + local.getZ() - cam.z
             );
-            renderManager.renderBlockAsEntity(state, matrices, ghostProvider, light, OverlayTexture.DEFAULT_UV);
+
+            RenderLayer layer = RenderLayers.getEntityBlockLayer(state, false);
+            VertexConsumer vc = immediate.getBuffer(layer);
+            brm.getModelRenderer().render(
+                matrices.peek(), vc, state, model,
+                1.0f, 1.0f, 1.0f, light, OverlayTexture.DEFAULT_UV
+            );
             matrices.pop();
         }
+        immediate.draw();
 
-        immediate.draw(RenderLayer.getTranslucent());
-
-        RenderSystem.depthMask(true);
-        RenderSystem.disableBlend();
+        // Тонкий цветной габарит поверх - чтобы читалось как "предпросмотр".
+        renderBox(context, blocks, anchor, cam, 0.35f, 0.85f, 1.0f, 0.10f);
     }
 
-    private static void renderSimplifiedBox(WorldRenderContext context, Map<BlockPos, BlockState> blocks, BlockPos anchor, Vec3d cameraPos) {
+    private static boolean isEnclosed(BlockPos p, Map<BlockPos, BlockState> b) {
+        return present(b, p.up()) && present(b, p.down())
+            && present(b, p.north()) && present(b, p.south())
+            && present(b, p.east()) && present(b, p.west());
+    }
+
+    private static boolean present(Map<BlockPos, BlockState> b, BlockPos p) {
+        BlockState s = b.get(p);
+        return s != null && !s.isAir();
+    }
+
+    private static void renderBox(WorldRenderContext context, Map<BlockPos, BlockState> blocks,
+                                  BlockPos anchor, Vec3d cam, float r, float g, float bl, float a) {
         int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
         int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
-
         for (BlockPos p : blocks.keySet()) {
             minX = Math.min(minX, p.getX()); maxX = Math.max(maxX, p.getX());
             minY = Math.min(minY, p.getY()); maxY = Math.max(maxY, p.getY());
             minZ = Math.min(minZ, p.getZ()); maxZ = Math.max(maxZ, p.getZ());
         }
-
         Box box = new Box(
             anchor.getX() + minX, anchor.getY() + minY, anchor.getZ() + minZ,
             anchor.getX() + maxX + 1, anchor.getY() + maxY + 1, anchor.getZ() + maxZ + 1
-        ).offset(-cameraPos.x, -cameraPos.y, -cameraPos.z);
+        ).offset(-cam.x, -cam.y, -cam.z);
 
-        Matrix4f matrix = context.matrixStack().peek().getPositionMatrix();
-        var tessellator = net.minecraft.client.render.Tessellator.getInstance();
-        var buffer = tessellator.getBuffer();
+        Matrix4f m = context.matrixStack().peek().getPositionMatrix();
+        var tess = net.minecraft.client.render.Tessellator.getInstance();
+        var buf = tess.getBuffer();
 
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.disableCull();
+        RenderSystem.depthMask(false);
         RenderSystem.setShader(net.minecraft.client.render.GameRenderer::getPositionColorProgram);
 
-        buffer.begin(net.minecraft.client.render.VertexFormat.DrawMode.QUADS, net.minecraft.client.render.VertexFormats.POSITION_COLOR);
+        buf.begin(net.minecraft.client.render.VertexFormat.DrawMode.QUADS,
+                  net.minecraft.client.render.VertexFormats.POSITION_COLOR);
+        float x1 = (float) box.minX, y1 = (float) box.minY, z1 = (float) box.minZ;
+        float x2 = (float) box.maxX, y2 = (float) box.maxY, z2 = (float) box.maxZ;
+        buf.vertex(m, x1, y1, z1).color(r, g, bl, a).next(); buf.vertex(m, x2, y1, z1).color(r, g, bl, a).next();
+        buf.vertex(m, x2, y1, z2).color(r, g, bl, a).next(); buf.vertex(m, x1, y1, z2).color(r, g, bl, a).next();
+        buf.vertex(m, x1, y2, z2).color(r, g, bl, a).next(); buf.vertex(m, x2, y2, z2).color(r, g, bl, a).next();
+        buf.vertex(m, x2, y2, z1).color(r, g, bl, a).next(); buf.vertex(m, x1, y2, z1).color(r, g, bl, a).next();
+        buf.vertex(m, x1, y1, z1).color(r, g, bl, a).next(); buf.vertex(m, x1, y2, z1).color(r, g, bl, a).next();
+        buf.vertex(m, x2, y2, z1).color(r, g, bl, a).next(); buf.vertex(m, x2, y1, z1).color(r, g, bl, a).next();
+        buf.vertex(m, x2, y1, z2).color(r, g, bl, a).next(); buf.vertex(m, x2, y2, z2).color(r, g, bl, a).next();
+        buf.vertex(m, x1, y2, z2).color(r, g, bl, a).next(); buf.vertex(m, x1, y1, z2).color(r, g, bl, a).next();
+        buf.vertex(m, x1, y1, z2).color(r, g, bl, a).next(); buf.vertex(m, x1, y2, z2).color(r, g, bl, a).next();
+        buf.vertex(m, x1, y2, z1).color(r, g, bl, a).next(); buf.vertex(m, x1, y1, z1).color(r, g, bl, a).next();
+        buf.vertex(m, x2, y1, z1).color(r, g, bl, a).next(); buf.vertex(m, x2, y2, z1).color(r, g, bl, a).next();
+        buf.vertex(m, x2, y2, z2).color(r, g, bl, a).next(); buf.vertex(m, x2, y1, z2).color(r, g, bl, a).next();
+        tess.draw();
 
-        float r = 1.0f, g = 1.0f, b = 1.0f, a = 0.25f;
-        float minXf = (float) box.minX, minYf = (float) box.minY, minZf = (float) box.minZ;
-        float maxXf = (float) box.maxX, maxYf = (float) box.maxY, maxZf = (float) box.maxZ;
-
-        buffer.vertex(matrix, minXf, minYf, minZf).color(r, g, b, a).next();
-        buffer.vertex(matrix, maxXf, minYf, minZf).color(r, g, b, a).next();
-        buffer.vertex(matrix, maxXf, minYf, maxZf).color(r, g, b, a).next();
-        buffer.vertex(matrix, minXf, minYf, maxZf).color(r, g, b, a).next();
-
-        buffer.vertex(matrix, minXf, maxYf, maxZf).color(r, g, b, a).next();
-        buffer.vertex(matrix, maxXf, maxYf, maxZf).color(r, g, b, a).next();
-        buffer.vertex(matrix, maxXf, maxYf, minZf).color(r, g, b, a).next();
-        buffer.vertex(matrix, minXf, maxYf, minZf).color(r, g, b, a).next();
-
-        tessellator.draw();
-
+        RenderSystem.depthMask(true);
         RenderSystem.enableCull();
         RenderSystem.disableBlend();
     }
