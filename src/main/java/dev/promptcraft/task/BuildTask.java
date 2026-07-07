@@ -16,12 +16,26 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 public class BuildTask implements Task {
+    // Кладём фиксированное число блоков за тик, независимо от количества операций.
+    // Один "fill" на 96x96x96 больше НЕ исполняется за один тик - именно это
+    // вешало сервер и роняло клиент в свободном режиме.
+    private static final int BLOCKS_PER_TICK = 2048;
+
     private final ServerPlayerEntity player;
     private final ServerWorld world;
     private final BlockPos origin;
     private final PromptCraftStructure structure;
     private final GenerationSession session;
+
     private int opIndex = 0;
+
+    // Состояние текущей объёмной операции, растянутой по тикам.
+    private boolean opInProgress = false;
+    private BlockState opState;
+    private int opFlags;
+    private boolean opHollow;
+    private int opMinX, opMinY, opMinZ, opMaxX, opMaxY, opMaxZ;
+    private int curX, curY, curZ;
 
     private final Set<String> unknownBlocks = new LinkedHashSet<>();
 
@@ -40,55 +54,96 @@ public class BuildTask implements Task {
             session.markBuildFinished();
             return true;
         }
+        if (structure == null || structure.operations == null) {
+            return finish();
+        }
 
-        if (structure == null || structure.operations == null || opIndex >= structure.operations.size()) {
-            if (!unknownBlocks.isEmpty()) {
-                player.sendMessage(Text.literal("Warning: AI referenced unknown block(s), skipped: " + String.join(", ", unknownBlocks))
-                        .formatted(Formatting.YELLOW), false);
+        int budget = BLOCKS_PER_TICK;
+
+        while (budget > 0) {
+            if (!opInProgress) {
+                if (opIndex >= structure.operations.size()) {
+                    return finish();
+                }
+                PromptCraftStructure.Operation op = structure.operations.get(opIndex);
+
+                if (op.block == null) { opIndex++; continue; }
+
+                var stateOpt = StructureBlockCodec.parse(op.block);
+                if (stateOpt.isEmpty()) {
+                    unknownBlocks.add(op.block.split("\\[")[0]);
+                    opIndex++;
+                    continue;
+                }
+
+                BlockState state = stateOpt.get();
+                int flags = BlockPlacementUtil.flagsFor(state);
+
+                if ("place".equals(op.type) && op.pos != null && op.pos.length == 3) {
+                    world.setBlockState(origin.add(op.pos[0], op.pos[1], op.pos[2]), state, flags);
+                    budget--;
+                    opIndex++;
+                    continue;
+                }
+
+                if (("fill".equals(op.type) || "hollow_box".equals(op.type))
+                        && op.from != null && op.to != null && op.from.length == 3 && op.to.length == 3) {
+                    opState = state;
+                    opFlags = flags;
+                    opHollow = "hollow_box".equals(op.type);
+                    opMinX = Math.min(op.from[0], op.to[0]); opMaxX = Math.max(op.from[0], op.to[0]);
+                    opMinY = Math.min(op.from[1], op.to[1]); opMaxY = Math.max(op.from[1], op.to[1]);
+                    opMinZ = Math.min(op.from[2], op.to[2]); opMaxZ = Math.max(op.from[2], op.to[2]);
+                    curX = opMinX; curY = opMinY; curZ = opMinZ;
+                    opInProgress = true;
+                } else {
+                    opIndex++;
+                    continue;
+                }
             }
-            player.sendMessage(Text.literal("Building complete!").formatted(Formatting.GREEN), false);
 
-            if (session != null) session.markBuildFinished();
-            PromptSessionManager.clearGeneration(player);
-            PromptCraftNetworking.sendAiStreamEvent(player, "done", "");
-            return true;
-        }
+            // Объёмная операция в процессе. Каждая посещённая ячейка тратит бюджет
+            // (в т.ч. пропущенная внутренность hollow_box), чтобы даже гигантский
+            // fill не мог заблокировать тик.
+            while (budget > 0 && curY <= opMaxY) {
+                boolean skip = opHollow
+                        && curX > opMinX && curX < opMaxX
+                        && curY > opMinY && curY < opMaxY
+                        && curZ > opMinZ && curZ < opMaxZ;
+                if (!skip) {
+                    world.setBlockState(origin.add(curX, curY, curZ), opState, opFlags);
+                }
+                budget--;
 
-        PromptCraftStructure.Operation op = structure.operations.get(opIndex++);
-        executeOp(op);
-        return false;
-    }
-
-    private void executeOp(PromptCraftStructure.Operation op) {
-        if (op.block == null) return;
-
-        var stateOpt = StructureBlockCodec.parse(op.block);
-        if (stateOpt.isEmpty()) {
-            unknownBlocks.add(op.block.split("\\[")[0]);
-            return;
-        }
-
-        BlockState state = stateOpt.get();
-        int flags = BlockPlacementUtil.flagsFor(state);
-
-        if ("place".equals(op.type) && op.pos != null && op.pos.length == 3) {
-            world.setBlockState(origin.add(op.pos[0], op.pos[1], op.pos[2]), state, flags);
-        } else if (("fill".equals(op.type) || "hollow_box".equals(op.type)) && op.from != null && op.to != null && op.from.length == 3 && op.to.length == 3) {
-            int minX = Math.min(op.from[0], op.to[0]);
-            int minY = Math.min(op.from[1], op.to[1]);
-            int minZ = Math.min(op.from[2], op.to[2]);
-            int maxX = Math.max(op.from[0], op.to[0]);
-            int maxY = Math.max(op.from[1], op.to[1]);
-            int maxZ = Math.max(op.from[2], op.to[2]);
-
-            for (int x = minX; x <= maxX; x++) {
-                for (int y = minY; y <= maxY; y++) {
-                    for (int z = minZ; z <= maxZ; z++) {
-                        if ("hollow_box".equals(op.type) && x > minX && x < maxX && y > minY && y < maxY && z > minZ && z < maxZ) continue;
-                        world.setBlockState(origin.add(x, y, z), state, flags);
+                curX++;
+                if (curX > opMaxX) {
+                    curX = opMinX;
+                    curZ++;
+                    if (curZ > opMaxZ) {
+                        curZ = opMinZ;
+                        curY++;
                     }
                 }
             }
+
+            if (curY > opMaxY) {
+                opInProgress = false;
+                opIndex++;
+            }
         }
+
+        return false;
+    }
+
+    private boolean finish() {
+        if (!unknownBlocks.isEmpty()) {
+            player.sendMessage(Text.literal("Warning: AI referenced unknown block(s), skipped: " + String.join(", ", unknownBlocks))
+                    .formatted(Formatting.YELLOW), false);
+        }
+        player.sendMessage(Text.literal("Building complete!").formatted(Formatting.GREEN), false);
+        if (session != null) session.markBuildFinished();
+        PromptSessionManager.clearGeneration(player);
+        PromptCraftNetworking.sendAiStreamEvent(player, "done", "");
+        return true;
     }
 }

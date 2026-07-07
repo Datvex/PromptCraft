@@ -1,40 +1,80 @@
 package dev.promptcraft.client;
 
+import com.google.gson.Gson;
 import com.mojang.blaze3d.systems.RenderSystem;
+import dev.promptcraft.client.gui.PlacementConfirmScreen;
 import dev.promptcraft.client.gui.PromptCraftSettingsScreen;
 import dev.promptcraft.config.PromptCraftConfig;
 import dev.promptcraft.config.PromptCraftConfigManager;
 import dev.promptcraft.network.PromptCraftNetworking;
+import dev.promptcraft.structure.PromptCraftStructure;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.render.*;
+import net.minecraft.client.util.InputUtil;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Matrix4f;
+import org.lwjgl.glfw.GLFW;
 
 public class PromptCraftClient implements ClientModInitializer {
     private static BlockPos firstPos = null;
     private static BlockPos secondPos = null;
 
+    private static KeyBinding rotateGhostKey;
+    private static KeyBinding confirmPlacementKey;
+
     @Override
     public void onInitializeClient() {
-        // Регистрация кнопки K (свободна в ваниле)
-        net.minecraft.client.option.KeyBinding openMenuKey = net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper.registerKeyBinding(new net.minecraft.client.option.KeyBinding(
+        KeyBinding openMenuKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.promptcraft.open_menu",
-                net.minecraft.client.util.InputUtil.Type.KEYSYM,
-                org.lwjgl.glfw.GLFW.GLFW_KEY_K,
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_K,
                 "category.promptcraft"
         ));
 
-        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(client -> {
+        rotateGhostKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.promptcraft.rotate_ghost",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_R,
+                "category.promptcraft"
+        ));
+
+        confirmPlacementKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.promptcraft.confirm_placement",
+                InputUtil.Type.MOUSE,
+                GLFW.GLFW_MOUSE_BUTTON_LEFT,
+                "category.promptcraft"
+        ));
+
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (openMenuKey.wasPressed()) {
                 if (client.player != null && client.currentScreen == null) {
-                    net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(PromptCraftNetworking.REQUEST_OPEN_GUI_PACKET, net.fabricmc.fabric.api.networking.v1.PacketByteBufs.create());
+                    ClientPlayNetworking.send(PromptCraftNetworking.REQUEST_OPEN_GUI_PACKET, PacketByteBufs.create());
+                }
+            }
+
+            while (rotateGhostKey.wasPressed()) {
+                if (GhostPreviewState.isActive()) {
+                    GhostPreviewState.rotate();
+                }
+            }
+
+            while (confirmPlacementKey.wasPressed()) {
+                if (GhostPreviewState.isActive() && client.currentScreen == null) {
+                    BlockPos anchor = GhostPreviewState.getCurrentAnchor();
+                    int rotation = GhostPreviewState.getRotationSteps();
+                    client.setScreen(new PlacementConfirmScreen(anchor, rotation));
                 }
             }
         });
@@ -62,15 +102,35 @@ public class PromptCraftClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(PromptCraftNetworking.START_FREE_PLACEMENT_PACKET, (client, handler, buf, responseSender) -> {
+            String json = buf.readString();
+            client.execute(() -> {
+                try {
+                    PromptCraftStructure structure = new Gson().fromJson(json, PromptCraftStructure.class);
+                    GhostPreviewState.start(structure);
+                } catch (Exception ignored) {
+                }
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(PromptCraftNetworking.CANCEL_FREE_PLACEMENT_PACKET, (client, handler, buf, responseSender) -> {
+            client.execute(() -> {
+                GhostPreviewState.cancel();
+                if (client.currentScreen instanceof PlacementConfirmScreen) {
+                    client.setScreen(null);
+                }
+            });
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(PromptCraftNetworking.OPEN_GUI_PACKET, (client, handler, buf, responseSender) -> {
             String provider = buf.readString();
-            
+
             int keyCount = buf.readInt();
             java.util.Map<String, String> apiKeys = new java.util.HashMap<>();
             for (int i = 0; i < keyCount; i++) {
                 apiKeys.put(buf.readString(), buf.readString());
             }
-            
+
             String model = buf.readString();
             boolean showPreview = buf.readBoolean();
             String language = buf.readString();
@@ -101,30 +161,49 @@ public class PromptCraftClient implements ClientModInitializer {
                             maxSelectionDepth
                     )
             ));
-        });        WorldRenderEvents.LAST.register(context -> {
+        });
+
+        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
+            if (!GhostPreviewState.isActive()) return;
+
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player == null || client.currentScreen != null) return;
+
+            String keyName = rotateGhostKey.getBoundKeyLocalizedText().getString();
+            String hint = "Press " + keyName + " to rotate the structure";
+
+            int screenWidth = client.getWindow().getScaledWidth();
+            int screenHeight = client.getWindow().getScaledHeight();
+
+            int textWidth = client.textRenderer.getWidth(hint);
+            int x = (screenWidth - textWidth) / 2;
+            int y = screenHeight - 40;
+
+            drawContext.drawTextWithShadow(client.textRenderer, hint, x, y, 0xFFFFFF);
+        });
+
+        WorldRenderEvents.LAST.register(context -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null) return;
-            
+
+            GhostRenderer.render(context);
+
             boolean showPreview = PromptCraftConfigManager.get().showSelectionPreview;
-            if (!showPreview) return; // Если предпросмотр вообще выключен в настройках
+            if (!showPreview) return;
 
             BlockPos pos1 = firstPos;
             BlockPos pos2 = secondPos;
 
-            // Если выделена только первая точка
             if (pos1 != null && pos2 == null) {
-                // Проверяем, держит ли игрок нашу кисть в главной или левой руке
-                boolean holdingBrush = client.player.getMainHandStack().isOf(dev.promptcraft.PromptCraftItems.SELECTION_BRUSH) || 
+                boolean holdingBrush = client.player.getMainHandStack().isOf(dev.promptcraft.PromptCraftItems.SELECTION_BRUSH) ||
                                        client.player.getOffHandStack().isOf(dev.promptcraft.PromptCraftItems.SELECTION_BRUSH);
-                
-                // Если кисти в руках нет — прерываем отрисовку
+
                 if (!holdingBrush) return;
 
                 HitResult hit = client.crosshairTarget;
                 if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
                     pos2 = ((BlockHitResult) hit).getBlockPos();
                 } else {
-                    // Безопасный фоллбэк: проецируем на 5 блоков вперёд, если смотрим в воздух
                     Vec3d eyePos = client.player.getCameraPosVec(context.tickDelta());
                     Vec3d lookVec = client.player.getRotationVec(context.tickDelta());
                     pos2 = BlockPos.ofFloored(eyePos.add(lookVec.multiply(5.0D)));

@@ -335,9 +335,10 @@ public class PromptCraftNetworking {
                     buf.writeString(new com.google.gson.Gson().toJson(structure));
                     ServerPlayNetworking.send(player, START_FREE_PLACEMENT_PACKET, buf);
 
-                    // Сессия намеренно НЕ очищается здесь: призрак ещё не размещён,
-                    // и Undo должен иметь возможность его отменить (см. cancelGeneration).
-                    sendAiStreamEvent(player, "done", "");
+                    // Сессия и AiStreamState.generating намеренно НЕ сбрасываются здесь: пока призрак
+                    // не размещён, вкладка Create должна оставаться заблокированной, а Undo должен
+                    // работать как "Cancel Generation" (см. cancelGeneration). Событие "done" отправит
+                    // сам BuildTask, когда постройка будет реально завершена после подтверждения.
                 });
             } else {
                 if (player.getServer() != null) {

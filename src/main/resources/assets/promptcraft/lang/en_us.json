@@ -26,5 +26,10 @@
   "promptcraft.message.settings.model": "Model: %s",
   "promptcraft.message.settings.access": "Access mode: %s",
   "promptcraft.message.settings.api_key": "API key: %s",
-  "promptcraft.message.settings.limit": "Selection limit: %s, max %sx%sx%s"
+  "promptcraft.message.settings.limit": "Selection limit: %s, max %sx%sx%s",
+
+  "category.promptcraft": "PromptCraft",
+  "key.promptcraft.open_menu": "Open Menu",
+  "key.promptcraft.rotate_ghost": "Rotate Preview (90°)",
+  "key.promptcraft.confirm_placement": "Confirm Structure Placement"
 }

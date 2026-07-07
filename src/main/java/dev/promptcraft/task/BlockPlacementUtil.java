@@ -8,7 +8,7 @@ public final class BlockPlacementUtil {
 
     public static final int SAFE_FORCE_FLAGS = Block.NOTIFY_LISTENERS | Block.FORCE_STATE;
 
-    public static final int NORMAL_FLAGS = Block.NOTIFY_NEIGHBORS | Block.NOTIFY_LISTENERS;
+    public static final int NORMAL_FLAGS = Block.NOTIFY_LISTENERS;
 
     private BlockPlacementUtil() {
     }
