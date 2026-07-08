@@ -214,23 +214,23 @@ public class PromptCraftSettingsScreen extends Screen {
         int contentY = menuY;
         int createY = menuY - 25;
 
-        promptField = new net.minecraft.client.gui.widget.EditBoxWidget(this.textRenderer, contentX - 5, createY, 190, 95, Text.literal("Prompt"), Text.literal(""));
+        promptField = new net.minecraft.client.gui.widget.EditBoxWidget(this.textRenderer, contentX - 5, createY, 190, 95, Text.literal(t("Prompt", "Запрос")), Text.literal(""));
         promptField.setText(PromptDraftState.get());
         this.addDrawableChild(promptField);
 
-        generateButton = new FlatButton(contentX - 5, createY + 100, 90, 20, Text.literal("Generate"), b -> sendGuiActionKeepOpen("generate", promptField.getText()));
+        generateButton = new FlatButton(contentX - 5, createY + 100, 90, 20, Text.literal(t("Generate", "Создать")), b -> sendGuiActionKeepOpen("generate", promptField.getText()));
         this.addDrawableChild(generateButton);
 
-        editButton = new FlatButton(contentX + 95, createY + 100, 90, 20, Text.literal("Edit"), b -> sendGuiActionKeepOpen("edit", promptField.getText()));
+        editButton = new FlatButton(contentX + 95, createY + 100, 90, 20, Text.literal(t("Edit", "Правка")), b -> sendGuiActionKeepOpen("edit", promptField.getText()));
         this.addDrawableChild(editButton);
 
-        undoButton = new FlatButton(contentX - 5, createY + 125, 190, 20, Text.literal("Undo (Clear)"), b -> sendGuiAction("undo", ""));
+        undoButton = new FlatButton(contentX - 5, createY + 125, 190, 20, Text.literal(t("Undo (Clear)", "Отменить (Очистить)")), b -> sendGuiAction("undo", ""));
         this.addDrawableChild(undoButton);
 
-        backButton = new FlatButton(contentX - 5, createY + 150, 90, 20, Text.literal("<< Back"), b -> sendGuiAction("back", ""));
+        backButton = new FlatButton(contentX - 5, createY + 150, 90, 20, Text.literal(t("<< Back", "<< Назад")), b -> sendGuiAction("back", ""));
         this.addDrawableChild(backButton);
 
-        nextButton = new FlatButton(contentX + 95, createY + 150, 90, 20, Text.literal("Next >>"), b -> sendGuiAction("next", ""));
+        nextButton = new FlatButton(contentX + 95, createY + 150, 90, 20, Text.literal(t("Next >>", "Далее >>")), b -> sendGuiAction("next", ""));
         this.addDrawableChild(nextButton);
 
         modeButton = new FlatButton(contentX - 5, createY + 175, 190, 20, Text.literal(getModeDisplayName(dev.promptcraft.config.PromptCraftConfigManager.get().generationMode)), b -> modeMenuOpen = !modeMenuOpen);
@@ -1024,8 +1024,8 @@ public class PromptCraftSettingsScreen extends Screen {
 
         if (selectedTab == TAB_API) {
             context.drawTextWithShadow(this.textRenderer, t("Provider:", "Провайдер:"), contentX - 5, contentY - 12, 0xFFFFFF);
-            context.drawTextWithShadow(this.textRenderer, "API Key:", contentX - 5, contentY + 26, 0xFFFFFF);
-            context.drawTextWithShadow(this.textRenderer, "Model:", contentX - 5, contentY + 68, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, t("API Key:", "API-ключ:"), contentX - 5, contentY + 26, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, t("Model:", "Модель:"), contentX - 5, contentY + 68, 0xFFFFFF);
 
             if (isFetchingModels) {
                 context.drawTextWithShadow(this.textRenderer, t("Fetching...", "Загрузка..."), contentX - 5, contentY + 110, 0xAAAAAA);

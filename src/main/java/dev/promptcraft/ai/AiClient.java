@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import dev.promptcraft.config.PromptCraftConfig;
 import dev.promptcraft.config.PromptCraftConfigManager;
 import dev.promptcraft.config.PromptCraftEnv;
+import dev.promptcraft.config.PromptCraftLang;
 import dev.promptcraft.network.PromptCraftNetworking;
 import dev.promptcraft.session.GenerationSession;
 import dev.promptcraft.structure.PromptCraftStructure;
@@ -70,7 +71,7 @@ public class AiClient {
         String apiKey = PromptCraftEnv.getApiKey(config.provider);
 
         if (apiKey == null || apiKey.isEmpty()) {
-            player.sendMessage(Text.literal("API Key is missing! Please use /pmenu").formatted(Formatting.RED), false);
+            player.sendMessage(Text.literal(PromptCraftLang.t("API Key is missing! Please use /pmenu", "API-ключ отсутствует! Используйте /pmenu")).formatted(Formatting.RED), false);
             PromptCraftNetworking.sendAiStreamEvent(player, "error", "API key is missing.");
             return CompletableFuture.completedFuture(null);
         }
@@ -97,7 +98,7 @@ public class AiClient {
                     if (response.statusCode() != 200) {
                         String body = readAll(response.body());
                         if (!session.isCancelled()) {
-                            String msg = "API Error: " + response.statusCode() + " - " + body;
+                            String msg = PromptCraftLang.t("API Error: ", "Ошибка API: ") + response.statusCode() + " - " + body;
                             player.sendMessage(Text.literal(msg).formatted(Formatting.RED), false);
                             PromptCraftNetworking.sendAiStreamEvent(player, "error", msg);
                         }
@@ -116,7 +117,7 @@ public class AiClient {
                         if (session.isCancelled()) return null;
 
                         if (content == null || content.isBlank()) {
-                            String msg = "AI returned an empty response.";
+                            String msg = PromptCraftLang.t("AI returned an empty response.", "ИИ вернул пустой ответ.");
                             player.sendMessage(Text.literal(msg).formatted(Formatting.RED), false);
                             PromptCraftNetworking.sendAiStreamEvent(player, "error", msg);
                             return null;
@@ -127,7 +128,7 @@ public class AiClient {
                         return GSON.fromJson(content, PromptCraftStructure.class);
                     } catch (Exception e) {
                         if (!session.isCancelled()) {
-                            String msg = "Failed to parse AI response: " + e.getMessage();
+                            String msg = PromptCraftLang.t("Failed to parse AI response: ", "Не удалось разобрать ответ ИИ: ") + e.getMessage();
                             player.sendMessage(Text.literal(msg).formatted(Formatting.RED), false);
                             PromptCraftNetworking.sendAiStreamEvent(player, "error", msg);
                         }
@@ -136,7 +137,7 @@ public class AiClient {
                 }, STREAM_EXECUTOR)
                 .exceptionally(ex -> {
                     if (!session.isCancelled()) {
-                        String msg = "Network error: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage());
+                        String msg = PromptCraftLang.t("Network error: ", "Сетевая ошибка: ") + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage());
                         player.sendMessage(Text.literal(msg).formatted(Formatting.RED), false);
                         PromptCraftNetworking.sendAiStreamEvent(player, "error", msg);
                     }

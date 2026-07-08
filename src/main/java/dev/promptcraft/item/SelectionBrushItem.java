@@ -2,6 +2,7 @@ package dev.promptcraft.item;
 
 import dev.promptcraft.config.PromptCraftConfig;
 import dev.promptcraft.config.PromptCraftConfigManager;
+import dev.promptcraft.config.PromptCraftLang;
 import dev.promptcraft.network.PromptCraftNetworking;
 import dev.promptcraft.selection.PlayerSelection;
 import dev.promptcraft.selection.SelectionManager;
@@ -31,7 +32,7 @@ public class SelectionBrushItem extends Item {
         if (!(player instanceof ServerPlayerEntity serverPlayer)) return ActionResult.PASS;
 
         if (!hasAccess(serverPlayer)) {
-            serverPlayer.sendMessage(Text.literal("Access Denied.").formatted(Formatting.RED), false);
+            serverPlayer.sendMessage(Text.literal(PromptCraftLang.t("Access Denied.", "Доступ запрещён.")).formatted(Formatting.RED), false);
             return ActionResult.FAIL;
         }
 
@@ -39,15 +40,15 @@ public class SelectionBrushItem extends Item {
         PlayerSelection selection = SelectionManager.get(serverPlayer);
 
         if (!selection.hasFirst()) {
-            serverPlayer.sendMessage(Text.literal("Select the first position with left click first.").formatted(Formatting.YELLOW), false);
+            serverPlayer.sendMessage(Text.literal(PromptCraftLang.t("Select the first position with left click first.", "Сначала выберите первую позицию левым кликом.")).formatted(Formatting.YELLOW), false);
             return ActionResult.SUCCESS;
         }
 
         selection.setSecond(pos.toImmutable());
         PromptCraftNetworking.syncSelection(serverPlayer, selection);
 
-        serverPlayer.sendMessage(Text.literal("Second position set at " + formatPos(pos)).formatted(Formatting.AQUA), false);
-        serverPlayer.sendMessage(Text.literal("Selection ready! Area: " + selection.getWidth() + "x" + selection.getHeight() + "x" + selection.getDepth()).formatted(Formatting.GREEN), false);
+        serverPlayer.sendMessage(Text.literal(PromptCraftLang.t("Second position set at ", "Вторая позиция установлена: ") + formatPos(pos)).formatted(Formatting.AQUA), false);
+        serverPlayer.sendMessage(Text.literal(PromptCraftLang.t("Selection ready! Area: ", "Область готова! Размер: ") + selection.getWidth() + "x" + selection.getHeight() + "x" + selection.getDepth()).formatted(Formatting.GREEN), false);
         return ActionResult.SUCCESS;
     }
 
@@ -63,7 +64,7 @@ public class SelectionBrushItem extends Item {
         }
         selection.setFirst(pos.toImmutable());
         PromptCraftNetworking.syncSelection(player, selection);
-        player.sendMessage(Text.literal("First position set at " + formatPos(pos)).formatted(Formatting.AQUA), false);
+        player.sendMessage(Text.literal(PromptCraftLang.t("First position set at ", "Первая позиция установлена: ") + formatPos(pos)).formatted(Formatting.AQUA), false);
     }
 
     private static String formatPos(BlockPos pos) {

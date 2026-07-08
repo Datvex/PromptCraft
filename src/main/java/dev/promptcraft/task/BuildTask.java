@@ -1,5 +1,6 @@
 package dev.promptcraft.task;
 
+import dev.promptcraft.config.PromptCraftLang;
 import dev.promptcraft.network.PromptCraftNetworking;
 import dev.promptcraft.session.GenerationSession;
 import dev.promptcraft.session.PromptSessionManager;
@@ -137,10 +138,10 @@ public class BuildTask implements Task {
 
     private boolean finish() {
         if (!unknownBlocks.isEmpty()) {
-            player.sendMessage(Text.literal("Warning: AI referenced unknown block(s), skipped: " + String.join(", ", unknownBlocks))
+            player.sendMessage(Text.literal(PromptCraftLang.t("Warning: AI referenced unknown block(s), skipped: ", "Внимание: ИИ использовал неизвестные блоки, пропущены: ") + String.join(", ", unknownBlocks))
                     .formatted(Formatting.YELLOW), false);
         }
-        player.sendMessage(Text.literal("Building complete!").formatted(Formatting.GREEN), false);
+        player.sendMessage(Text.literal(PromptCraftLang.t("Building complete!", "Постройка завершена!")).formatted(Formatting.GREEN), false);
         if (session != null) session.markBuildFinished();
         PromptSessionManager.clearGeneration(player);
         PromptCraftNetworking.sendAiStreamEvent(player, "done", "");

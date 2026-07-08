@@ -1,5 +1,6 @@
 package dev.promptcraft;
 
+import dev.promptcraft.config.PromptCraftLang;
 import dev.promptcraft.network.PromptCraftNetworking;
 import dev.promptcraft.config.PromptCraftConfigManager;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -40,7 +41,7 @@ public final class PromptCraftCommands {
             ItemStack stack = serverPlayer.getStackInHand(hand);
             if (!stack.isOf(PromptCraftItems.SELECTION_BRUSH)) return ActionResult.PASS;
             if (!hasAccess(serverPlayer)) {
-                serverPlayer.sendMessage(Text.literal("Access Denied.").formatted(Formatting.RED), false);
+                serverPlayer.sendMessage(Text.literal(PromptCraftLang.t("Access Denied.", "Доступ запрещён.")).formatted(Formatting.RED), false);
                 return ActionResult.FAIL;
             }
             dev.promptcraft.item.SelectionBrushItem.setFirstPosition(serverPlayer, pos);

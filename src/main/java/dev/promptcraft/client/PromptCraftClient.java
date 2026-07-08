@@ -6,6 +6,8 @@ import dev.promptcraft.client.gui.PlacementConfirmScreen;
 import dev.promptcraft.client.gui.PromptCraftSettingsScreen;
 import dev.promptcraft.config.PromptCraftConfig;
 import dev.promptcraft.config.PromptCraftConfigManager;
+import dev.promptcraft.config.PromptCraftLang;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import dev.promptcraft.network.PromptCraftNetworking;
 import dev.promptcraft.structure.PromptCraftStructure;
 import net.fabricmc.api.ClientModInitializer;
@@ -58,6 +60,17 @@ public class PromptCraftClient implements ClientModInitializer {
                 GLFW.GLFW_MOUSE_BUTTON_LEFT,
                 "category.promptcraft"
         ));
+
+        // При заходе в мир подхватываем язык интерфейса Minecraft: русский -> ru,
+        // любой другой -> en. Одна проверка на join, нагрузки нет.
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            String mcLang = client.getLanguageManager().getLanguage();
+            String detected = (mcLang != null && mcLang.toLowerCase().startsWith("ru")) ? "ru" : "en";
+            if (!detected.equals(PromptCraftConfigManager.get().language)) {
+                PromptCraftConfigManager.get().language = detected;
+                PromptCraftConfigManager.save();
+            }
+        });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             installScrollHookIfNeeded(client);
@@ -174,7 +187,9 @@ public class PromptCraftClient implements ClientModInitializer {
             if (client.player == null || client.currentScreen != null) return;
 
             String keyName = rotateGhostKey.getBoundKeyLocalizedText().getString();
-            String hint = "Press " + keyName + " to rotate the structure";
+            String hint = PromptCraftLang.t("Press ", "Нажмите ")
+                + keyName
+                + PromptCraftLang.t(" to rotate the structure", ", чтобы повернуть структуру");
 
             int screenWidth = client.getWindow().getScaledWidth();
             int screenHeight = client.getWindow().getScaledHeight();

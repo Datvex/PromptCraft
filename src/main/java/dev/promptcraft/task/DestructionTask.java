@@ -1,6 +1,7 @@
 package dev.promptcraft.task;
 
 import dev.promptcraft.config.PromptCraftConfigManager;
+import dev.promptcraft.config.PromptCraftLang;
 import dev.promptcraft.session.GenerationSession;
 import dev.promptcraft.structure.BlockSnapshot;
 import dev.promptcraft.structure.HistoryManager;
@@ -54,7 +55,7 @@ public class DestructionTask implements Task {
             if (currentY > max.getY()) {
                 HistoryManager.pushUndo(player, snapshotList);
                 if (session != null) session.markDestructionComplete();
-                player.sendMessage(Text.literal("Area cleared. Generating...").formatted(Formatting.GREEN), false);
+                player.sendMessage(Text.literal(PromptCraftLang.t("Area cleared. Generating...", "Область очищена. Генерация...")).formatted(Formatting.GREEN), false);
                 if (onComplete != null) onComplete.run();
                 return true;
             }
@@ -96,6 +97,6 @@ public class DestructionTask implements Task {
             }
         }
         if (session != null) session.markDestructionComplete();
-        player.sendMessage(Text.literal("Generation cancelled. Area restored.").formatted(Formatting.YELLOW), false);
+        player.sendMessage(Text.literal(PromptCraftLang.t("Generation cancelled. Area restored.", "Генерация отменена. Область восстановлена.")).formatted(Formatting.YELLOW), false);
     }
 }

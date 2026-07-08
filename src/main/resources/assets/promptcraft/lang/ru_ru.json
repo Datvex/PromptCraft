@@ -1,0 +1,28 @@
+{
+  "item.promptcraft.selection_brush": "Кисть выделения",
+  "itemGroup.promptcraft.promptcraft": "PromptCraft",
+
+  "promptcraft.message.selection.first": "Первая позиция установлена: %s",
+  "promptcraft.message.selection.second": "Вторая позиция установлена: %s",
+  "promptcraft.message.selection.ready": "Область готова! Размер: %sx%sx%s",
+  "promptcraft.message.selection.too_large": "Область слишком большая: %sx%sx%s. Максимальный размер: %sx%sx%s.",
+  "promptcraft.message.selection.required": "Сначала нужно выделить область!",
+  "promptcraft.message.creative_required": "Нужно находиться в творческом режиме.",
+  "promptcraft.message.access_denied": "Доступ запрещён.",
+
+  "promptcraft.message.placement.confirm_title": "Подтверждение размещения",
+  "promptcraft.message.placement.confirm_question": "Вы уверены, что хотите разместить структуру здесь?",
+  "promptcraft.message.placement.yes": "Да",
+  "promptcraft.message.placement.no": "Нет",
+
+  "promptcraft.message.settings.header": "Настройки PromptCraft",
+  "promptcraft.message.settings.provider": "Провайдер: %s",
+  "promptcraft.message.settings.model": "Модель: %s",
+  "promptcraft.message.settings.api_key": "API-ключ: %s",
+  "promptcraft.message.settings.limit": "Лимит области: %s, макс. %sx%sx%s",
+
+  "category.promptcraft": "PromptCraft",
+  "key.promptcraft.open_menu": "Открыть меню",
+  "key.promptcraft.rotate_ghost": "Повернуть предпросмотр (90°)",
+  "key.promptcraft.confirm_placement": "Подтвердить размещение структуры"
+}

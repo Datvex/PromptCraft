@@ -4,6 +4,7 @@ import dev.promptcraft.PromptCraftMod;
 import dev.promptcraft.config.PromptCraftConfig;
 import dev.promptcraft.config.PromptCraftConfigManager;
 import dev.promptcraft.config.PromptCraftEnv;
+import dev.promptcraft.config.PromptCraftLang;
 import dev.promptcraft.selection.PlayerSelection;
 import dev.promptcraft.session.GenerationSession;
 import dev.promptcraft.session.PendingPrompt;
@@ -99,14 +100,14 @@ public class PromptCraftNetworking {
                     return;
                 }
                 if (!player.isCreative()) {
-                    player.sendMessage(Text.literal("You must be in creative mode.").formatted(Formatting.RED), false);
+                    player.sendMessage(Text.literal(PromptCraftLang.t("You must be in creative mode.", "Нужно находиться в творческом режиме.")).formatted(Formatting.RED), false);
                     if (isGenOrEdit) sendAiStreamEvent(player, "cancelled", "");
                     return;
                 }
 
                 if ("generate".equals(action)) {
                     if (PromptSessionManager.isGenerating(player)) {
-                        player.sendMessage(Text.literal("A generation is already in progress.").formatted(Formatting.RED), false);
+                        player.sendMessage(Text.literal(PromptCraftLang.t("A generation is already in progress.", "Генерация уже выполняется.")).formatted(Formatting.RED), false);
                         return;
                     }
 
@@ -123,7 +124,7 @@ public class PromptCraftNetworking {
                     } else {
                         PlayerSelection selection = dev.promptcraft.selection.SelectionManager.get(player);
                         if (!selection.isComplete()) {
-                            player.sendMessage(Text.literal("You must select an area first!").formatted(Formatting.RED), false);
+                            player.sendMessage(Text.literal(PromptCraftLang.t("You must select an area first!", "Сначала нужно выделить область!")).formatted(Formatting.RED), false);
                             sendAiStreamEvent(player, "cancelled", "");
                             return;
                         }
@@ -135,14 +136,14 @@ public class PromptCraftNetworking {
 
                 } else if ("edit".equals(action)) {
                     if (PromptSessionManager.isGenerating(player)) {
-                        player.sendMessage(Text.literal("A generation is already in progress.").formatted(Formatting.RED), false);
+                        player.sendMessage(Text.literal(PromptCraftLang.t("A generation is already in progress.", "Генерация уже выполняется.")).formatted(Formatting.RED), false);
                         sendAiStreamEvent(player, "cancelled", "");
                         return;
                     }
 
                     var lastOpt = PromptSessionManager.getLast(player);
                     if (lastOpt.isEmpty()) {
-                        player.sendMessage(Text.literal("No previous prompt to edit!").formatted(Formatting.RED), false);
+                        player.sendMessage(Text.literal(PromptCraftLang.t("No previous prompt to edit!", "Нет предыдущего запроса для правки!")).formatted(Formatting.RED), false);
                         sendAiStreamEvent(player, "cancelled", "");
                         return;
                     }
@@ -160,31 +161,31 @@ public class PromptCraftNetworking {
                     }
 
                     if (dev.promptcraft.structure.HistoryManager.undo(player)) {
-                        player.sendMessage(Text.literal("Step back successful.").formatted(Formatting.GREEN), false);
+                        player.sendMessage(Text.literal(PromptCraftLang.t("Step back successful.", "Шаг назад выполнен.")).formatted(Formatting.GREEN), false);
                     } else {
-                        player.sendMessage(Text.literal("Nothing to undo.").formatted(Formatting.RED), false);
+                        player.sendMessage(Text.literal(PromptCraftLang.t("Nothing to undo.", "Нечего отменять.")).formatted(Formatting.RED), false);
                     }
                 } else if ("back".equals(action)) {
                     if (PromptSessionManager.isGenerating(player)) {
-                        player.sendMessage(Text.literal("Cannot go back while generating.").formatted(Formatting.RED), false);
+                        player.sendMessage(Text.literal(PromptCraftLang.t("Cannot go back while generating.", "Нельзя вернуться назад во время генерации.")).formatted(Formatting.RED), false);
                         return;
                     }
 
                     if (dev.promptcraft.structure.HistoryManager.undo(player)) {
-                        player.sendMessage(Text.literal("Step back successful.").formatted(Formatting.GREEN), false);
+                        player.sendMessage(Text.literal(PromptCraftLang.t("Step back successful.", "Шаг назад выполнен.")).formatted(Formatting.GREEN), false);
                     } else {
-                        player.sendMessage(Text.literal("Nothing to undo.").formatted(Formatting.RED), false);
+                        player.sendMessage(Text.literal(PromptCraftLang.t("Nothing to undo.", "Нечего отменять.")).formatted(Formatting.RED), false);
                     }
                 } else if ("next".equals(action)) {
                     if (PromptSessionManager.isGenerating(player)) {
-                        player.sendMessage(Text.literal("Cannot redo while generating.").formatted(Formatting.RED), false);
+                        player.sendMessage(Text.literal(PromptCraftLang.t("Cannot redo while generating.", "Нельзя вернуть во время генерации.")).formatted(Formatting.RED), false);
                         return;
                     }
 
                     if (dev.promptcraft.structure.HistoryManager.redo(player)) {
-                        player.sendMessage(Text.literal("Step forward successful.").formatted(Formatting.GREEN), false);
+                        player.sendMessage(Text.literal(PromptCraftLang.t("Step forward successful.", "Шаг вперёд выполнен.")).formatted(Formatting.GREEN), false);
                     } else {
-                        player.sendMessage(Text.literal("Nothing to redo.").formatted(Formatting.RED), false);
+                        player.sendMessage(Text.literal(PromptCraftLang.t("Nothing to redo.", "Нечего возвращать.")).formatted(Formatting.RED), false);
                     }
                 }
             });
@@ -224,11 +225,11 @@ public class PromptCraftNetworking {
                     PromptSessionManager.setLast(player, updated);
                 });
 
-                player.sendMessage(Text.literal("Placing structure...").formatted(Formatting.YELLOW), false);
+                player.sendMessage(Text.literal(PromptCraftLang.t("Placing structure...", "Размещение структуры...")).formatted(Formatting.YELLOW), false);
 
                 dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.DestructionTask(player, min, max, session, () -> {
                     if (session.isCancelled()) return;
-                    player.sendMessage(Text.literal("Area cleared. Building...").formatted(Formatting.GREEN), false);
+                    player.sendMessage(Text.literal(PromptCraftLang.t("Area cleared. Building...", "Область очищена. Строим...")).formatted(Formatting.GREEN), false);
                     dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.BuildTask(player, anchor, rotated, session));
                 }));
             });
@@ -283,11 +284,11 @@ public class PromptCraftNetworking {
     private static void executeBuildProcess(ServerPlayerEntity player, PendingPrompt prompt) {
         GenerationSession session = PromptSessionManager.startGeneration(player);
 
-        player.sendMessage(Text.literal("Preparing area...").formatted(Formatting.YELLOW), false);
+        player.sendMessage(Text.literal(PromptCraftLang.t("Preparing area...", "Подготовка области...")).formatted(Formatting.YELLOW), false);
         dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.DestructionTask(player, prompt.getSelectionMin(), prompt.getSelectionMax(), session, () -> {
             if (session.isCancelled()) return;
 
-            player.sendMessage(Text.literal("Area cleared. Contacting AI...").formatted(Formatting.AQUA), false);
+            player.sendMessage(Text.literal(PromptCraftLang.t("Area cleared. Contacting AI...", "Область очищена. Связь с ИИ...")).formatted(Formatting.AQUA), false);
             dev.promptcraft.ai.AiClient.requestBuild(player, prompt.getPrompt(), prompt.getWidth(), prompt.getHeight(), prompt.getDepth(), session)
                     .thenAccept(structure -> {
                         if (session.isCancelled()) return;
@@ -295,7 +296,7 @@ public class PromptCraftNetworking {
                         if (structure != null && player.getServer() != null) {
                             player.getServer().execute(() -> {
                                 if (session.isCancelled()) return;
-                                player.sendMessage(Text.literal("AI response received! Building...").formatted(Formatting.GREEN), false);
+                                player.sendMessage(Text.literal(PromptCraftLang.t("AI response received! Building...", "Ответ ИИ получен! Строим...")).formatted(Formatting.GREEN), false);
                                 dev.promptcraft.task.TaskManager.addTask(new dev.promptcraft.task.BuildTask(player, prompt.getSelectionMin(), structure, session));
                             });
                         } else {
@@ -309,7 +310,7 @@ public class PromptCraftNetworking {
         GenerationSession session = PromptSessionManager.startGeneration(player);
         PromptCraftConfig config = PromptCraftConfigManager.get();
 
-        player.sendMessage(Text.literal("Contacting AI for free placement...").formatted(Formatting.AQUA), false);
+        player.sendMessage(Text.literal(PromptCraftLang.t("Contacting AI for free placement...", "Связь с ИИ для свободного размещения...")).formatted(Formatting.AQUA), false);
 
         dev.promptcraft.ai.AiClient.requestFreeBuild(
                 player,
@@ -329,7 +330,7 @@ public class PromptCraftNetworking {
                     session.setPendingStructure(structure);
                     session.setGhostPending(true);
 
-                    player.sendMessage(Text.literal("AI response received! Position the preview and confirm placement.").formatted(Formatting.GREEN), false);
+                    player.sendMessage(Text.literal(PromptCraftLang.t("AI response received! Position the preview and confirm placement.", "Ответ ИИ получен! Наведите предпросмотр и подтвердите размещение.")).formatted(Formatting.GREEN), false);
 
                     PacketByteBuf buf = PacketByteBufs.create();
                     buf.writeString(new com.google.gson.Gson().toJson(structure));
@@ -344,7 +345,7 @@ public class PromptCraftNetworking {
                 if (player.getServer() != null) {
                     player.getServer().execute(() -> {
                         if (!session.isCancelled()) {
-                            player.sendMessage(Text.literal("AI returned an empty structure.").formatted(Formatting.RED), false);
+                            player.sendMessage(Text.literal(PromptCraftLang.t("AI returned an empty structure.", "ИИ вернул пустую структуру.")).formatted(Formatting.RED), false);
                         }
                         PromptSessionManager.clearGeneration(player);
                     });
@@ -369,6 +370,6 @@ public class PromptCraftNetworking {
 
         PromptSessionManager.clearGeneration(player);
         sendAiStreamEvent(player, "cancelled", "");
-        player.sendMessage(Text.literal("Generation cancelled.").formatted(Formatting.YELLOW), false);
+        player.sendMessage(Text.literal(PromptCraftLang.t("Generation cancelled.", "Генерация отменена.")).formatted(Formatting.YELLOW), false);
     }
 }
