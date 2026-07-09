@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 
 public final class PromptCraftConfigManager {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -21,6 +23,13 @@ public final class PromptCraftConfigManager {
     private static final Path ENV_PATH = CONFIG_DIR.resolve(".env");
 
     private static PromptCraftConfig config = new PromptCraftConfig();
+
+    /**
+     * Кеш max_tokens на модель, заполняется из ответа /v1/models (клиент) или вручную.
+     * Используется AiClient.buildRequest() для Anthropic (который требует max_tokens).
+     * Ключ — ID модели, значение — её потолок токенов.
+     */
+    public static final Map<String, Integer> MODEL_MAX_TOKENS = new HashMap<>();
 
     private PromptCraftConfigManager() {
     }

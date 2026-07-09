@@ -24,6 +24,7 @@ public class PromptCraftConfig {
     public int maxSelectionDepth = 64;
 
     public int maxRepairAttempts = 3;
+    public int maxOutputTokens = 16384;
 
     public boolean isAccessEveryone() {
         return "everyone".equalsIgnoreCase(accessMode);

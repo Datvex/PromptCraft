@@ -23,9 +23,7 @@ public final class StructureValidator {
             || c[2] < 0 || c[2] > d - 1;
     }
 
-    /**
-     * Уточняющий промпт для ИИ: не обрезать, а переделать структуру под коробку.
-     */
+    /** Уточняющий промпт для ИИ: не обрезать, а переделать структуру под коробку. */
     public static String buildCorrectionNote(PromptCraftStructure s, int w, int h, int d) {
         PromptCraftStructure.Bounds b = s.computeBounds();
         return "\n\nCRITICAL CORRECTION - YOUR PREVIOUS OUTPUT DID NOT FIT THE BUILD AREA. "
@@ -56,7 +54,7 @@ public final class StructureValidator {
             n.block = op.block;
 
             if ("place".equals(op.type) && op.pos != null && op.pos.length == 3) {
-                if (out(op.pos, w, h, d)) continue; // блок не туда -> выбрасываем
+                if (out(op.pos, w, h, d)) continue;
                 n.pos = op.pos;
                 result.operations.add(n);
             } else if (("fill".equals(op.type) || "hollow_box".equals(op.type))
@@ -68,7 +66,7 @@ public final class StructureValidator {
                     int lo = Math.min(op.from[a], op.to[a]);
                     int hi = Math.max(op.from[a], op.to[a]);
                     int max = dims[a] - 1;
-                    if (hi < 0 || lo > max) { drop = true; break; } // целиком вне зоны по этой оси
+                    if (hi < 0 || lo > max) { drop = true; break; }
                     from[a] = Math.max(0, lo);
                     to[a] = Math.min(max, hi);
                 }
@@ -77,7 +75,7 @@ public final class StructureValidator {
                 n.to = to;
                 result.operations.add(n);
             } else {
-                result.operations.add(n); // прочее оставляем как есть
+                result.operations.add(n);
             }
         }
         return result;

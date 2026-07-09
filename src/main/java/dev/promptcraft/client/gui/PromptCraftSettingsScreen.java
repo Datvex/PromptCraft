@@ -663,6 +663,7 @@ public class PromptCraftSettingsScreen extends Screen {
             case "openrouter" -> "https://openrouter.ai/api/v1/models";
             case "xai" -> "https://api.x.ai/v1/models";
             case "gemini" -> "https://generativelanguage.googleapis.com/v1beta/models";
+            case "anthropic" -> "https://api.anthropic.com/v1/models";
             default -> null;
         };
     }
@@ -677,6 +678,22 @@ public class PromptCraftSettingsScreen extends Screen {
                 String name = e.getAsJsonObject().get("name").getAsString();
                 if (name.startsWith("models/")) name = name.substring("models/".length());
                 models.add(name);
+            }
+            return models;
+        }
+
+        if ("anthropic".equals(provider)) {
+            // Anthropic: {"data":[{"id":"claude-sonnet-4-20250514","max_tokens":128000,...}]}
+            JsonArray arr = root.getAsJsonArray("data");
+            for (JsonElement e : arr) {
+                JsonObject obj = e.getAsJsonObject();
+                if (obj.has("id")) {
+                    String id = obj.get("id").getAsString();
+                    models.add(id);
+                    if (obj.has("max_tokens") && !obj.get("max_tokens").isJsonNull()) {
+                        dev.promptcraft.config.PromptCraftConfigManager.MODEL_MAX_TOKENS.put(id, obj.get("max_tokens").getAsInt());
+                    }
+                }
             }
             return models;
         }
@@ -1588,8 +1605,25 @@ public class PromptCraftSettingsScreen extends Screen {
     }
 
     private class PasswordFieldWidget extends TextFieldWidget {
+
+        // Своё зеркало выделения: super хранит его в приватных полях, а нам нужно рисовать.
+        private int selStart = 0;
+        private int selEnd = 0;
+
         public PasswordFieldWidget(net.minecraft.client.font.TextRenderer textRenderer, int x, int y, int width, int height, Text text) {
             super(textRenderer, x, y, width, height, text);
+        }
+
+        @Override
+        public void setSelectionStart(int cursor) {
+            super.setSelectionStart(cursor);
+            this.selStart = net.minecraft.util.math.MathHelper.clamp(cursor, 0, this.getText().length());
+        }
+
+        @Override
+        public void setSelectionEnd(int index) {
+            super.setSelectionEnd(index);
+            this.selEnd = net.minecraft.util.math.MathHelper.clamp(index, 0, this.getText().length());
         }
 
         @Override
@@ -1597,7 +1631,6 @@ public class PromptCraftSettingsScreen extends Screen {
             if (!this.visible) return;
 
             int bgColor = this.isFocused() ? 0xFF3A3A3A : 0xFF2D2D2D;
-
             context.fill(
                     this.getX() - 7,
                     this.getY() - 6,
@@ -1608,17 +1641,33 @@ public class PromptCraftSettingsScreen extends Screen {
 
             String real = this.getText();
             String shown = real.isEmpty() ? "" : "*".repeat(Math.min(real.length(), 32));
+            int shownLen = shown.length();
+
+            net.minecraft.client.font.TextRenderer tr = PromptCraftSettingsScreen.this.textRenderer;
+
+            // Подсветка выделения цветом темы. Рисуем ДО текста, чтобы звёздочки читались поверх.
+            int a = Math.min(Math.min(this.selStart, this.selEnd), shownLen);
+            int b = Math.min(Math.max(this.selStart, this.selEnd), shownLen);
+            if (a != b) {
+                int x1 = this.getX() + tr.getWidth(shown.substring(0, a));
+                int x2 = this.getX() + tr.getWidth(shown.substring(0, b));
+                int themeRgb = parseThemeColor(themeColor) & 0x00FFFFFF;
+                int selColor = 0x99000000 | themeRgb; // ~60% альфа, цвет темы из раздела Theme
+                context.fill(x1, this.getY() - 1, x2, this.getY() + 11, selColor);
+            }
 
             context.drawTextWithShadow(
-                    PromptCraftSettingsScreen.this.textRenderer,
+                    tr,
                     shown,
                     this.getX(),
                     this.getY() + 2,
                     this.active ? 0xE0E0E0 : 0x707070
             );
 
+            // Курсор мигает только когда нет активного выделения, и стоит на реальной позиции.
             if (this.isFocused() && this.getSelectedText().isEmpty() && (System.currentTimeMillis() / 500) % 2 == 0) {
-                int cursorX = this.getX() + PromptCraftSettingsScreen.this.textRenderer.getWidth(shown);
+                int cur = Math.min(this.selStart, shownLen);
+                int cursorX = this.getX() + tr.getWidth(shown.substring(0, cur));
                 context.fill(cursorX + 1, this.getY(), cursorX + 2, this.getY() + 11, 0xFFFFFFFF);
             }
         }

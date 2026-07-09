@@ -48,7 +48,7 @@ public class AiClient {
     /** Ручной режим: коробка = выделение игрока, границы жёсткие (enforce + переспрос). */
     public static CompletableFuture<PromptCraftStructure> requestBuild(
             ServerPlayerEntity player, String prompt, int width, int height, int depth, GenerationSession session) {
-        return requestBuildInternal(player, prompt, "", width, height, depth, session, false, true, 0);
+        return requestBuildInternal(player, prompt, "", width, height, depth, session, false, true, 0, 0);
     }
 
     /**
@@ -61,7 +61,78 @@ public class AiClient {
         int width = limitEnabled ? maxWidth : FREE_MODE_SAFETY_CEILING;
         int height = limitEnabled ? maxHeight : FREE_MODE_SAFETY_CEILING;
         int depth = limitEnabled ? maxDepth : FREE_MODE_SAFETY_CEILING;
-        return requestBuildInternal(player, prompt, "", width, height, depth, session, true, limitEnabled, 0);
+        return requestBuildInternal(player, prompt, "", width, height, depth, session, true, limitEnabled, 0, 0);
+    }
+
+    // === CORE ================================================================
+
+    private static final int MAX_TRANSIENT_RETRIES = 3;
+
+    private static <T> CompletableFuture<T> retryAfterDelay(java.util.function.Supplier<CompletableFuture<T>> action) {
+        return CompletableFuture
+                .supplyAsync(() -> (T) null,
+                        CompletableFuture.delayedExecutor(600, java.util.concurrent.TimeUnit.MILLISECONDS, STREAM_EXECUTOR))
+                .thenCompose(ignored -> action.get());
+    }
+
+    /** Ленивый разбор: строгий -> извлечение объекта -> спасение обрезанного массива операций. */
+    private static PromptCraftStructure parseStructureLenient(String raw) {
+        String json = extractJsonObject(raw);
+        if (json == null) return null;
+        try {
+            PromptCraftStructure s = GSON.fromJson(json, PromptCraftStructure.class);
+            if (s != null && s.operations != null && !s.operations.isEmpty()) return s;
+        } catch (Exception ignored) {
+            // упало -> пробуем спасти то, что успело прийти
+        }
+        return salvageOperations(json);
+    }
+
+    /** Отрезает прозу/`<think>`/фенсы: берём от первой '{' до последней '}'. Если закрытия нет (обрыв) - до конца. */
+    private static String extractJsonObject(String raw) {
+        if (raw == null) return null;
+        String s = raw.replace("```json", "").replace("```", "").trim();
+        int start = s.indexOf('{');
+        if (start < 0) return null;
+        int end = s.lastIndexOf('}');
+        return (end > start) ? s.substring(start, end + 1) : s.substring(start);
+    }
+
+    /**
+     * Спасает обрезанный ответ: проходит по массиву operations с учётом строк и вложенности,
+     * собирает только ПОЛНЫЕ объекты {...}, недописанный последний выбрасывает, и пересобирает JSON.
+     */
+    private static PromptCraftStructure salvageOperations(String json) {
+        int arrStart = json.indexOf('[');
+        if (arrStart < 0) return null;
+
+        java.util.List<String> objs = new java.util.ArrayList<>();
+        int depth = 0, objStart = -1;
+        boolean inString = false, escape = false;
+
+        for (int i = arrStart + 1; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (inString) {
+                if (escape) escape = false;
+                else if (c == '\\') escape = true;
+                else if (c == '"') inString = false;
+                continue;
+            }
+            if (c == '"') { inString = true; }
+            else if (c == '{') { if (depth == 0) objStart = i; depth++; }
+            else if (c == '}') {
+                depth--;
+                if (depth == 0 && objStart >= 0) { objs.add(json.substring(objStart, i + 1)); objStart = -1; }
+            } else if (c == ']' && depth == 0) {
+                break;
+            }
+        }
+        if (objs.isEmpty()) return null;
+        try {
+            return GSON.fromJson("{\"operations\":[" + String.join(",", objs) + "]}", PromptCraftStructure.class);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     // === CORE ================================================================
@@ -69,7 +140,7 @@ public class AiClient {
     private static CompletableFuture<PromptCraftStructure> requestBuildInternal(
             ServerPlayerEntity player, String originalPrompt, String correctionNote,
             int width, int height, int depth, GenerationSession session,
-            boolean freeChoice, boolean enforceBounds, int attempt) {
+            boolean freeChoice, boolean enforceBounds, int attempt, int transientAttempt) {
 
         PromptCraftConfig config = PromptCraftConfigManager.get();
         String apiKey = PromptCraftEnv.getApiKey(config.provider);
@@ -93,6 +164,9 @@ public class AiClient {
                 HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
         session.setHttpFuture(httpFuture);
 
+        // true -> сбой транзиентный (пусто/парс/сеть), можно молча повторить.
+        final boolean[] retriable = {false};
+
         CompletableFuture<PromptCraftStructure> parseFuture = httpFuture
                 .thenApplyAsync(response -> {
                     if (session.isCancelled()) return null;
@@ -103,7 +177,7 @@ public class AiClient {
                             player.sendMessage(Text.literal(msg).formatted(Formatting.RED), false);
                             PromptCraftNetworking.sendAiStreamEvent(player, "error", msg);
                         }
-                        return null;
+                        return null; // не ретраим статусные ошибки (ключ/квота)
                     }
                     session.setActiveStream(response.body());
                     try {
@@ -114,34 +188,48 @@ public class AiClient {
                         };
                         if (session.isCancelled()) return null;
                         if (content == null || content.isBlank()) {
-                            String msg = PromptCraftLang.t("AI returned an empty response.", "ИИ вернул пустой ответ.");
-                            player.sendMessage(Text.literal(msg).formatted(Formatting.RED), false);
-                            PromptCraftNetworking.sendAiStreamEvent(player, "error", msg);
+                            retriable[0] = true; // пусто -> тихий ретрай
                             return null;
                         }
-                        content = content.replace("```json", "").replace("```", "").trim();
-                        return GSON.fromJson(content, PromptCraftStructure.class);
-                    } catch (Exception e) {
-                        if (!session.isCancelled()) {
-                            String msg = PromptCraftLang.t("Failed to parse AI response: ", "Не удалось разобрать ответ ИИ: ") + e.getMessage();
-                            player.sendMessage(Text.literal(msg).formatted(Formatting.RED), false);
-                            PromptCraftNetworking.sendAiStreamEvent(player, "error", msg);
+                        PromptCraftStructure parsed = parseStructureLenient(content);
+                        if (parsed == null || parsed.operations == null || parsed.operations.isEmpty()) {
+                            retriable[0] = true; // не разобрали ничего годного -> ретрай
+                            return null;
                         }
+                        return parsed;
+                    } catch (Exception e) {
+                        if (!session.isCancelled()) retriable[0] = true;
                         return null;
                     }
                 }, STREAM_EXECUTOR)
                 .exceptionally(ex -> {
-                    if (!session.isCancelled()) {
-                        String msg = PromptCraftLang.t("Network error: ", "Сетевая ошибка: ") + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage());
-                        player.sendMessage(Text.literal(msg).formatted(Formatting.RED), false);
-                        PromptCraftNetworking.sendAiStreamEvent(player, "error", msg);
-                    }
+                    if (!session.isCancelled()) retriable[0] = true;
                     return null;
                 });
 
-        // Валидация координат + при необходимости переспрос ИИ.
-        return parseFuture.thenCompose(structure -> validateAndRepair(
-                player, originalPrompt, structure, width, height, depth, session, freeChoice, enforceBounds, attempt));
+        return parseFuture.thenCompose(structure -> {
+            if (session.isCancelled()) return CompletableFuture.completedFuture(null);
+
+            if (structure == null) {
+                if (retriable[0] && transientAttempt < MAX_TRANSIENT_RETRIES) {
+                    // Тихо повторяем, игрока не спамим.
+                    return retryAfterDelay(() -> requestBuildInternal(
+                            player, originalPrompt, correctionNote, width, height, depth,
+                            session, freeChoice, enforceBounds, attempt, transientAttempt + 1));
+                }
+                if (retriable[0]) {
+                    String msg = PromptCraftLang.t(
+                            "AI request failed after several attempts. Please try again.",
+                            "Запрос к ИИ не удался после нескольких попыток. Попробуйте ещё раз.");
+                    notifyPlayer(player, msg, msg, Formatting.RED);
+                    if (player.getServer() != null) {
+                        player.getServer().execute(() -> PromptCraftNetworking.sendAiStreamEvent(player, "error", msg));
+                    }
+                }
+                return CompletableFuture.completedFuture(null);
+            }
+            return validateAndRepair(player, originalPrompt, structure, width, height, depth, session, freeChoice, enforceBounds, attempt);
+        });
     }
 
     private static CompletableFuture<PromptCraftStructure> validateAndRepair(
@@ -166,7 +254,7 @@ public class AiClient {
                     "Постройка ИИ не вписалась в область, просим переделать... (" + shown + "/" + maxAttempts + ")",
                     Formatting.YELLOW);
             String correction = StructureValidator.buildCorrectionNote(structure, width, height, depth);
-            return requestBuildInternal(player, originalPrompt, correction, width, height, depth, session, freeChoice, enforceBounds, attempt + 1);
+            return requestBuildInternal(player, originalPrompt, correction, width, height, depth, session, freeChoice, enforceBounds, attempt + 1, 0);
         }
 
         // Попытки исчерпаны (или лимит выключен) -> крайняя мера: обрезаем по границам.
@@ -330,6 +418,14 @@ public class AiClient {
         return m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4") || m.contains("reasoning");
     }
 
+    /** Динамический потолок вывода для Anthropic по ID модели. */
+    private static int anthropicMaxTokens(String model) {
+        if (model == null) return 128000;
+        String m = model.toLowerCase();
+        if (m.contains("haiku")) return 64000; // Haiku 4.5 и другие haiku: потолок 64k
+        return 128000;                          // Sonnet / Opus / Fable / Mythos и пр.
+    }
+
     // =========================================================================
     // === REQUEST BUILDING  (без изменений)
     // =========================================================================
@@ -428,7 +524,7 @@ public class AiClient {
                 payload.addProperty("system", systemPrompt);
                 payload.addProperty("stream", true);
                 payload.addProperty("temperature", 0.3);
-                payload.addProperty("max_tokens", 8192);
+                payload.addProperty("max_tokens", anthropicMaxTokens(config.model));
                 JsonObject anthropicMsg = new JsonObject();
                 anthropicMsg.addProperty("role", "user");
                 anthropicMsg.addProperty("content", userPrompt);
@@ -445,7 +541,6 @@ public class AiClient {
                 JsonObject usrContent = new JsonObject(); usrContent.addProperty("role", "user"); usrContent.add("parts", usrParts);
                 JsonArray contents = new JsonArray(); contents.add(usrContent);
                 JsonObject genConfig = new JsonObject(); genConfig.addProperty("temperature", 0.3);
-                genConfig.addProperty("maxOutputTokens", 8192);
                 JsonObject thinkingConfig = new JsonObject();
                 thinkingConfig.addProperty("includeThoughts", true);
                 genConfig.add("thinkingConfig", thinkingConfig);
@@ -488,10 +583,10 @@ public class AiClient {
                 payload.addProperty("model", config.model);
                 if (openAiReasoningModel) {
                     payload.addProperty("reasoning_effort", "high");
-                    payload.addProperty("max_completion_tokens", 8192);
+                    // без лимита вывода: провайдер сам берёт максимум модели
                 } else {
                     payload.addProperty("temperature", 0.3);
-                    payload.addProperty("max_tokens", 8192);
+                    // без max_tokens: без лимита вывода
                 }
                 payload.addProperty("stream", true);
                 payload.add("messages", GSON.toJsonTree(new JsonObject[]{sysMsg, usrMsg}));
