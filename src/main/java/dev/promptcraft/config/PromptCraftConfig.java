@@ -23,6 +23,8 @@ public class PromptCraftConfig {
     public int maxSelectionHeight = 64;
     public int maxSelectionDepth = 64;
 
+    public int maxRepairAttempts = 3;
+
     public boolean isAccessEveryone() {
         return "everyone".equalsIgnoreCase(accessMode);
     }

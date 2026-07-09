@@ -139,6 +139,20 @@ public class PromptCraftClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(PromptCraftNetworking.BUILD_PROGRESS_PACKET, (client, handler, buf, responseSender) -> {
+            int percent = buf.readInt();
+            boolean active = buf.readBoolean();
+            client.execute(() -> {
+                if (active) {
+                    BuildProgressState.update(percent);
+                } else if (percent >= 100) {
+                    BuildProgressState.complete();
+                } else {
+                    BuildProgressState.hide();
+                }
+            });
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(PromptCraftNetworking.OPEN_GUI_PACKET, (client, handler, buf, responseSender) -> {
             String provider = buf.readString();
 
@@ -199,6 +213,41 @@ public class PromptCraftClient implements ClientModInitializer {
             int y = screenHeight - 40;
 
             drawContext.drawTextWithShadow(client.textRenderer, hint, x, y, 0xFFFFFF);
+        });
+
+        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
+            if (!BuildProgressState.isVisible()) return;
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player == null || client.currentScreen != null) return;
+
+            int percent = BuildProgressState.getPercent();
+            int screenWidth = client.getWindow().getScaledWidth();
+            int screenHeight = client.getWindow().getScaledHeight();
+
+            int barWidth = 160;
+            int barHeight = 9;
+            int barX = (screenWidth - barWidth) / 2;
+            int barY = screenHeight - 52;
+
+            String hex = PromptCraftConfigManager.get().themeColor.replace("#", "");
+            int rgb = 0x17b95f;
+            try { rgb = Integer.parseInt(hex, 16); } catch (Exception ignored) {}
+            int fillColor = 0xFF000000 | rgb;
+
+            String label = PromptCraftLang.t("Building structure", "Строительство структуры");
+            drawContext.drawTextWithShadow(client.textRenderer, label, barX, barY - 12, 0xFFFFFFFF);
+
+            // рамка + фон трека
+            drawContext.fill(barX - 1, barY - 1, barX + barWidth + 1, barY + barHeight + 1, 0xFF000000);
+            drawContext.fill(barX, barY, barX + barWidth, barY + barHeight, 0xFF2B2B2B);
+
+            // заполнение
+            int fillW = Math.max(0, Math.min(barWidth, (int) (barWidth * (percent / 100.0f))));
+            drawContext.fill(barX, barY, barX + fillW, barY + barHeight, fillColor);
+
+            // проценты справа
+            String pct = percent + "%";
+            drawContext.drawTextWithShadow(client.textRenderer, pct, barX + barWidth + 6, barY + 1, 0xFFFFFFFF);
         });
 
         WorldRenderEvents.LAST.register(context -> {

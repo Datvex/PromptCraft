@@ -11,6 +11,7 @@ import dev.promptcraft.config.PromptCraftLang;
 import dev.promptcraft.network.PromptCraftNetworking;
 import dev.promptcraft.session.GenerationSession;
 import dev.promptcraft.structure.PromptCraftStructure;
+import dev.promptcraft.structure.StructureValidator;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -30,9 +31,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class AiClient {
+
     private static final Gson GSON = new Gson();
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(45)).build();
-
     private static final ExecutorService STREAM_EXECUTOR = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "PromptCraft-AI-Stream");
         t.setDaemon(true);
@@ -40,42 +41,43 @@ public class AiClient {
     });
 
     private static final long REQUEST_TIMEOUT_SECONDS = 300L;
-
     private static final int FREE_MODE_SAFETY_CEILING = 96;
 
+    // === PUBLIC ENTRY POINTS =================================================
+
+    /** Ручной режим: коробка = выделение игрока, границы жёсткие (enforce + переспрос). */
     public static CompletableFuture<PromptCraftStructure> requestBuild(
-            ServerPlayerEntity player,
-            String prompt,
-            int width,
-            int height,
-            int depth,
-            GenerationSession session
-    ) {
-        return requestBuild(player, prompt, width, height, depth, session, false);
+            ServerPlayerEntity player, String prompt, int width, int height, int depth, GenerationSession session) {
+        return requestBuildInternal(player, prompt, "", width, height, depth, session, false, true, 0);
     }
 
     /**
-     * @param freeChoice true - режим "AI сам выбирает зону"; ширина/высота/глубина в этом случае
-     *                   передаются как безопасный потолок, а не как обязательный к заполнению размер.
+     * Свободный режим. Если лимит включён - коробка = макс. размер из настроек, границы жёсткие.
+     * Если лимит выключен - используем безопасный потолок и молча клемпим (без переспроса).
      */
-    public static CompletableFuture<PromptCraftStructure> requestBuild(
-            ServerPlayerEntity player,
-            String prompt,
-            int width,
-            int height,
-            int depth,
-            GenerationSession session,
-            boolean freeChoice
-    ) {
+    public static CompletableFuture<PromptCraftStructure> requestFreeBuild(
+            ServerPlayerEntity player, String prompt, boolean limitEnabled,
+            int maxWidth, int maxHeight, int maxDepth, GenerationSession session) {
+        int width = limitEnabled ? maxWidth : FREE_MODE_SAFETY_CEILING;
+        int height = limitEnabled ? maxHeight : FREE_MODE_SAFETY_CEILING;
+        int depth = limitEnabled ? maxDepth : FREE_MODE_SAFETY_CEILING;
+        return requestBuildInternal(player, prompt, "", width, height, depth, session, true, limitEnabled, 0);
+    }
+
+    // === CORE ================================================================
+
+    private static CompletableFuture<PromptCraftStructure> requestBuildInternal(
+            ServerPlayerEntity player, String originalPrompt, String correctionNote,
+            int width, int height, int depth, GenerationSession session,
+            boolean freeChoice, boolean enforceBounds, int attempt) {
+
         PromptCraftConfig config = PromptCraftConfigManager.get();
         String apiKey = PromptCraftEnv.getApiKey(config.provider);
-
         if (apiKey == null || apiKey.isEmpty()) {
             player.sendMessage(Text.literal(PromptCraftLang.t("API Key is missing! Please use /pmenu", "API-ключ отсутствует! Используйте /pmenu")).formatted(Formatting.RED), false);
             PromptCraftNetworking.sendAiStreamEvent(player, "error", "API key is missing.");
             return CompletableFuture.completedFuture(null);
         }
-
         if (session.isCancelled()) {
             return CompletableFuture.completedFuture(null);
         }
@@ -83,7 +85,7 @@ public class AiClient {
         PromptCraftNetworking.sendAiStreamEvent(player, "start", "");
 
         String systemPrompt = buildSystemPrompt(width, height, depth, freeChoice);
-        String userPrompt = "Build the following, respecting ALL rules above: " + prompt;
+        String userPrompt = "Build the following, respecting ALL rules above: " + originalPrompt + correctionNote;
 
         HttpRequest request = buildRequest(config, apiKey, systemPrompt, userPrompt);
 
@@ -91,10 +93,9 @@ public class AiClient {
                 HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
         session.setHttpFuture(httpFuture);
 
-        return httpFuture
+        CompletableFuture<PromptCraftStructure> parseFuture = httpFuture
                 .thenApplyAsync(response -> {
                     if (session.isCancelled()) return null;
-
                     if (response.statusCode() != 200) {
                         String body = readAll(response.body());
                         if (!session.isCancelled()) {
@@ -104,27 +105,21 @@ public class AiClient {
                         }
                         return null;
                     }
-
                     session.setActiveStream(response.body());
-
                     try {
                         String content = switch (config.provider) {
                             case "anthropic" -> streamAnthropic(player, response.body(), session);
                             case "gemini" -> streamGemini(player, response.body(), session);
                             default -> streamOpenAiCompatible(player, response.body(), session);
                         };
-
                         if (session.isCancelled()) return null;
-
                         if (content == null || content.isBlank()) {
                             String msg = PromptCraftLang.t("AI returned an empty response.", "ИИ вернул пустой ответ.");
                             player.sendMessage(Text.literal(msg).formatted(Formatting.RED), false);
                             PromptCraftNetworking.sendAiStreamEvent(player, "error", msg);
                             return null;
                         }
-
                         content = content.replace("```json", "").replace("```", "").trim();
-
                         return GSON.fromJson(content, PromptCraftStructure.class);
                     } catch (Exception e) {
                         if (!session.isCancelled()) {
@@ -143,30 +138,60 @@ public class AiClient {
                     }
                     return null;
                 });
+
+        // Валидация координат + при необходимости переспрос ИИ.
+        return parseFuture.thenCompose(structure -> validateAndRepair(
+                player, originalPrompt, structure, width, height, depth, session, freeChoice, enforceBounds, attempt));
     }
 
-    public static CompletableFuture<PromptCraftStructure> requestFreeBuild(
-            ServerPlayerEntity player,
-            String prompt,
-            boolean limitEnabled,
-            int maxWidth,
-            int maxHeight,
-            int maxDepth,
-            GenerationSession session
-    ) {
-        int width = limitEnabled ? maxWidth : FREE_MODE_SAFETY_CEILING;
-        int height = limitEnabled ? maxHeight : FREE_MODE_SAFETY_CEILING;
-        int depth = limitEnabled ? maxDepth : FREE_MODE_SAFETY_CEILING;
-        return requestBuild(player, prompt, width, height, depth, session, true);
+    private static CompletableFuture<PromptCraftStructure> validateAndRepair(
+            ServerPlayerEntity player, String originalPrompt, PromptCraftStructure structure,
+            int width, int height, int depth, GenerationSession session,
+            boolean freeChoice, boolean enforceBounds, int attempt) {
+
+        if (structure == null || session.isCancelled()) {
+            return CompletableFuture.completedFuture(structure);
+        }
+        if (StructureValidator.isWithinBounds(structure, width, height, depth)) {
+            return CompletableFuture.completedFuture(structure);
+        }
+
+        int maxAttempts = Math.max(0, PromptCraftConfigManager.get().maxRepairAttempts);
+
+        // Границы жёсткие -> просим ИИ переделать (не режем), пока есть попытки.
+        if (enforceBounds && attempt < maxAttempts) {
+            int shown = attempt + 1;
+            notifyPlayer(player,
+                    "AI build didn't fit the area, asking it to adjust... (" + shown + "/" + maxAttempts + ")",
+                    "Постройка ИИ не вписалась в область, просим переделать... (" + shown + "/" + maxAttempts + ")",
+                    Formatting.YELLOW);
+            String correction = StructureValidator.buildCorrectionNote(structure, width, height, depth);
+            return requestBuildInternal(player, originalPrompt, correction, width, height, depth, session, freeChoice, enforceBounds, attempt + 1);
+        }
+
+        // Попытки исчерпаны (или лимит выключен) -> крайняя мера: обрезаем по границам.
+        if (enforceBounds) {
+            notifyPlayer(player,
+                    "AI couldn't fit the build after several tries. Trimming it to stay inside the area.",
+                    "ИИ не смог вписать постройку за несколько попыток. Обрезаю её по границам области.",
+                    Formatting.YELLOW);
+        }
+        return CompletableFuture.completedFuture(StructureValidator.clamp(structure, width, height, depth));
+    }
+
+    private static void notifyPlayer(ServerPlayerEntity player, String en, String ru, Formatting color) {
+        if (player.getServer() != null) {
+            player.getServer().execute(() ->
+                    player.sendMessage(Text.literal(PromptCraftLang.t(en, ru)).formatted(color), false));
+        }
     }
 
     // =========================================================================
-    // === STREAM PARSERS
+    // === STREAM PARSERS  (без изменений)
     // =========================================================================
 
     private static String streamOpenAiCompatible(ServerPlayerEntity player, InputStream body, GenerationSession session) throws IOException {
         StringBuilder content = new StringBuilder();
-
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))) {
             String line;
             while (!session.isCancelled() && (line = reader.readLine()) != null) {
@@ -174,24 +199,19 @@ public class AiClient {
                 String data = line.substring(5).trim();
                 if (data.isEmpty()) continue;
                 if ("[DONE]".equals(data)) break;
-
                 try {
                     JsonObject obj = GSON.fromJson(data, JsonObject.class);
                     if (obj == null || !obj.has("choices")) continue;
-
                     JsonArray choices = obj.getAsJsonArray("choices");
                     if (choices.isEmpty()) continue;
-
                     JsonObject choice = choices.get(0).getAsJsonObject();
                     if (!choice.has("delta")) continue;
                     JsonObject delta = choice.getAsJsonObject("delta");
-
                     String reasoning = getStringOrNull(delta, "reasoning_content");
                     if (reasoning == null) reasoning = getStringOrNull(delta, "reasoning");
                     if (reasoning != null && !reasoning.isEmpty()) {
                         sendReasoning(player, reasoning);
                     }
-
                     String contentChunk = getStringOrNull(delta, "content");
                     if (contentChunk != null && !contentChunk.isEmpty()) {
                         content.append(contentChunk);
@@ -202,29 +222,24 @@ public class AiClient {
         } catch (IOException e) {
             if (!session.isCancelled()) throw e;
         }
-
         return content.toString();
     }
 
     private static String streamAnthropic(ServerPlayerEntity player, InputStream body, GenerationSession session) throws IOException {
         StringBuilder content = new StringBuilder();
-
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))) {
             String line;
             while (!session.isCancelled() && (line = reader.readLine()) != null) {
                 if (!line.startsWith("data:")) continue;
                 String data = line.substring(5).trim();
                 if (data.isEmpty()) continue;
-
                 try {
                     JsonObject obj = GSON.fromJson(data, JsonObject.class);
                     if (obj == null || !obj.has("type")) continue;
                     String type = obj.get("type").getAsString();
-
                     if ("content_block_delta".equals(type) && obj.has("delta")) {
                         JsonObject delta = obj.getAsJsonObject("delta");
                         String deltaType = delta.has("type") ? delta.get("type").getAsString() : "";
-
                         if ("thinking_delta".equals(deltaType)) {
                             String thinking = getStringOrNull(delta, "thinking");
                             if (thinking != null) sendReasoning(player, thinking);
@@ -243,39 +258,31 @@ public class AiClient {
         } catch (IOException e) {
             if (!session.isCancelled()) throw e;
         }
-
         return content.toString();
     }
 
     private static String streamGemini(ServerPlayerEntity player, InputStream body, GenerationSession session) throws IOException {
         StringBuilder content = new StringBuilder();
-
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))) {
             String line;
             while (!session.isCancelled() && (line = reader.readLine()) != null) {
                 if (!line.startsWith("data:")) continue;
                 String data = line.substring(5).trim();
                 if (data.isEmpty()) continue;
-
                 try {
                     JsonObject obj = GSON.fromJson(data, JsonObject.class);
                     if (obj == null || !obj.has("candidates")) continue;
-
                     JsonArray candidates = obj.getAsJsonArray("candidates");
                     if (candidates.isEmpty()) continue;
-
                     JsonObject candidate = candidates.get(0).getAsJsonObject();
                     if (!candidate.has("content")) continue;
-
                     JsonObject contentObj = candidate.getAsJsonObject("content");
                     if (!contentObj.has("parts")) continue;
                     JsonArray parts = contentObj.getAsJsonArray("parts");
-
                     for (JsonElement partEl : parts) {
                         JsonObject part = partEl.getAsJsonObject();
                         String text = getStringOrNull(part, "text");
                         if (text == null || text.isEmpty()) continue;
-
                         boolean isThought = part.has("thought") && !part.get("thought").isJsonNull() && part.get("thought").getAsBoolean();
                         if (isThought) {
                             sendReasoning(player, text);
@@ -289,7 +296,6 @@ public class AiClient {
         } catch (IOException e) {
             if (!session.isCancelled()) throw e;
         }
-
         return content.toString();
     }
 
@@ -325,21 +331,19 @@ public class AiClient {
     }
 
     // =========================================================================
-    // === REQUEST BUILDING
+    // === REQUEST BUILDING  (без изменений)
     // =========================================================================
 
     private static String buildSystemPrompt(int width, int height, int depth, boolean freeChoice) {
         String blockList = BlockCatalog.getBlockListForPrompt();
-
         String areaNote = freeChoice
                 ? "\n\nNote: this bounding box is a generous safety ceiling, not a target you must fill. " +
-                  "You have full creative freedom to choose whatever footprint size naturally fits the user's " +
-                  "request - small or large - as long as every coordinate stays within the box above."
+                "You have full creative freedom to choose whatever footprint size naturally fits the user's " +
+                "request - small or large - as long as every coordinate stays within the box above."
                 : "";
 
         return "You are an expert Minecraft Java Edition architect and building assistant. " +
                 "Your task is to design a structure and output it as a precise sequence of build operations in JSON format.\n\n" +
-
                 "=== OUTPUT FORMAT ===\n" +
                 "Output ONLY a single valid JSON object. Do not include any explanation, comments, or markdown code fences (no ```json). " +
                 "Your entire response must be parseable as JSON.\n\n" +
@@ -353,7 +357,6 @@ public class AiClient {
                 "3. \"hollow_box\" - creates a hollow rectangular shell (floor, ceiling, and all 4 walls, each 1 block thick) " +
                 "with one block type, leaving the interior untouched.\n" +
                 "   {\"type\":\"hollow_box\",\"from\":[x1,y1,z1],\"to\":[x2,y2,z2],\"block\":\"minecraft:<block_id>\"}\n\n" +
-
                 "=== BLOCK STATES (ORIENTATION) ===\n" +
                 "Some blocks require orientation/state properties to look correct. Append them in square brackets directly " +
                 "after the block ID, comma-separated, no spaces:\n" +
@@ -374,7 +377,6 @@ public class AiClient {
                 "Simply place the base block ID without brackets for these.\n\n" +
                 "If you are not fully certain of a block's valid property names/values, omit the brackets entirely and " +
                 "place the plain block ID - an imperfect default orientation is far better than an invalid state.\n\n" +
-
                 "=== COORDINATE SYSTEM ===\n" +
                 "- Origin [0,0,0] is the bottom-north-west corner of your build area.\n" +
                 "- X axis = width (0 to WIDTH-1), Y axis = height (0 = floor level, increasing = upward), Z axis = depth (0 to DEPTH-1).\n" +
@@ -385,7 +387,6 @@ public class AiClient {
                 "- Operations are applied in the exact order you list them; later operations overwrite earlier ones at the same " +
                 "position. Use this: build the basic shell first, then carve doors/windows by placing \"minecraft:air\" " +
                 "afterward, then add details on top.\n\n" +
-
                 "=== DESIGN GUIDELINES ===\n" +
                 "Before producing the final JSON, mentally plan the structure in this order:\n" +
                 "1. Foundation / floor.\n" +
@@ -399,7 +400,6 @@ public class AiClient {
                 "cherry_stairs, cherry_fence) and use it consistently throughout the structure.\n\n" +
                 "Keep proportions realistic and structurally sound relative to the given bounding box. Prefer variety and " +
                 "visual detail over flat, empty, monotonous surfaces, but never exceed the given dimensions.\n\n" +
-
                 "=== AVAILABLE BLOCKS ===\n" +
                 "You MUST use ONLY block IDs from the list below (prefix each with \"minecraft:\" when writing them into the " +
                 "JSON - the prefix is omitted below to save space). Do NOT invent, guess, or hallucinate any block ID that is " +
@@ -407,7 +407,6 @@ public class AiClient {
                 "Minecraft version. If a block name you were thinking of is not in this list, it does not exist in this " +
                 "version; pick the closest available substitute instead.\n" +
                 blockList + "\n\n" +
-
                 "=== BUILD AREA ===\n" +
                 "Bounding box size: width=" + width + ", height=" + height + ", depth=" + depth +
                 " (coordinates range from [0,0,0] to [" + (width - 1) + "," + (height - 1) + "," + (depth - 1) + "] inclusive)."
@@ -425,44 +424,35 @@ public class AiClient {
             case "anthropic":
                 url = "https://api.anthropic.com/v1/messages";
                 requestBuilder.header("x-api-key", apiKey).header("anthropic-version", "2023-06-01");
-
                 payload.addProperty("model", config.model);
                 payload.addProperty("system", systemPrompt);
                 payload.addProperty("stream", true);
                 payload.addProperty("temperature", 0.3);
                 payload.addProperty("max_tokens", 8192);
-
                 JsonObject anthropicMsg = new JsonObject();
                 anthropicMsg.addProperty("role", "user");
                 anthropicMsg.addProperty("content", userPrompt);
                 payload.add("messages", GSON.toJsonTree(new JsonObject[]{anthropicMsg}));
                 break;
-
             case "gemini":
                 url = "https://generativelanguage.googleapis.com/v1beta/models/" + config.model + ":streamGenerateContent?alt=sse";
                 requestBuilder.header("x-goog-api-key", apiKey);
-
                 JsonObject sysPart = new JsonObject(); sysPart.addProperty("text", systemPrompt);
                 JsonArray sysParts = new JsonArray(); sysParts.add(sysPart);
                 JsonObject sysInst = new JsonObject(); sysInst.add("parts", sysParts);
-
                 JsonObject usrPart = new JsonObject(); usrPart.addProperty("text", userPrompt);
                 JsonArray usrParts = new JsonArray(); usrParts.add(usrPart);
                 JsonObject usrContent = new JsonObject(); usrContent.addProperty("role", "user"); usrContent.add("parts", usrParts);
                 JsonArray contents = new JsonArray(); contents.add(usrContent);
-
                 JsonObject genConfig = new JsonObject(); genConfig.addProperty("temperature", 0.3);
                 genConfig.addProperty("maxOutputTokens", 8192);
-
                 JsonObject thinkingConfig = new JsonObject();
                 thinkingConfig.addProperty("includeThoughts", true);
                 genConfig.add("thinkingConfig", thinkingConfig);
-
                 payload.add("systemInstruction", sysInst);
                 payload.add("contents", contents);
                 payload.add("generationConfig", genConfig);
                 break;
-
             default:
                 url = switch (config.provider) {
                     case "openai" -> "https://api.openai.com/v1/chat/completions";
@@ -471,41 +461,31 @@ public class AiClient {
                     case "xai" -> "https://api.x.ai/v1/chat/completions";
                     default -> "https://integrate.api.nvidia.com/v1/chat/completions";
                 };
-
                 requestBuilder.header("Authorization", "Bearer " + apiKey);
-
                 if (config.provider.equals("openrouter")) {
-                    requestBuilder.header("HTTP-Referer", "https://github.com/PromptCraft");
+                    requestBuilder.header("HTTP-Referer", "PromptCraft");
                     requestBuilder.header("X-OpenRouter-Title", "PromptCraft Mod");
-
                     payload.addProperty("include_reasoning", true);
                     JsonObject reasoningObj = new JsonObject();
                     reasoningObj.addProperty("effort", "high");
                     payload.add("reasoning", reasoningObj);
                 }
-
                 if (config.provider.equals("nvidia")) {
                     JsonObject templateKwargs = new JsonObject();
                     templateKwargs.addProperty("enable_thinking", true);
                     payload.add("chat_template_kwargs", templateKwargs);
                 }
-
                 if (config.provider.equals("xai")) {
                     payload.addProperty("reasoning_effort", "high");
                 }
-
                 boolean openAiReasoningModel = "openai".equals(config.provider) && isOpenAiReasoningModel(config.model);
-
                 JsonObject sysMsg = new JsonObject();
                 sysMsg.addProperty("role", openAiReasoningModel ? "developer" : "system");
                 sysMsg.addProperty("content", systemPrompt);
-
                 JsonObject usrMsg = new JsonObject();
                 usrMsg.addProperty("role", "user");
                 usrMsg.addProperty("content", userPrompt);
-
                 payload.addProperty("model", config.model);
-
                 if (openAiReasoningModel) {
                     payload.addProperty("reasoning_effort", "high");
                     payload.addProperty("max_completion_tokens", 8192);
@@ -513,7 +493,6 @@ public class AiClient {
                     payload.addProperty("temperature", 0.3);
                     payload.addProperty("max_tokens", 8192);
                 }
-
                 payload.addProperty("stream", true);
                 payload.add("messages", GSON.toJsonTree(new JsonObject[]{sysMsg, usrMsg}));
                 break;

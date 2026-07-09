@@ -33,6 +33,7 @@ public class PromptCraftNetworking {
     public static final Identifier START_FREE_PLACEMENT_PACKET = new Identifier(PromptCraftMod.MOD_ID, "start_free_placement");
     public static final Identifier CANCEL_FREE_PLACEMENT_PACKET = new Identifier(PromptCraftMod.MOD_ID, "cancel_free_placement");
     public static final Identifier CONFIRM_PLACEMENT_PACKET = new Identifier(PromptCraftMod.MOD_ID, "confirm_placement");
+    public static final Identifier BUILD_PROGRESS_PACKET = new Identifier(PromptCraftMod.MOD_ID, "build_progress");
 
     public static void registerServerReceivers() {
         ServerPlayNetworking.registerGlobalReceiver(SAVE_GUI_PACKET, (server, player, handler, buf, responseSender) -> {
@@ -279,6 +280,13 @@ public class PromptCraftNetworking {
         buf.writeString(eventType);
         buf.writeString(payload == null ? "" : payload);
         ServerPlayNetworking.send(player, AI_STREAM_PACKET, buf);
+    }
+
+    public static void sendBuildProgress(ServerPlayerEntity player, int percent, boolean active) {
+        PacketByteBuf buf = PacketByteBufs.create();
+        buf.writeInt(percent);
+        buf.writeBoolean(active);
+        ServerPlayNetworking.send(player, BUILD_PROGRESS_PACKET, buf);
     }
 
     private static void executeBuildProcess(ServerPlayerEntity player, PendingPrompt prompt) {
