@@ -42,6 +42,8 @@ public class AiClient {
 
     private static final long REQUEST_TIMEOUT_SECONDS = 300L;
     private static final int FREE_MODE_SAFETY_CEILING = 96;
+    private static final double CREATIVE_TEMPERATURE = 0.85;
+    private static final double PRECISE_TEMPERATURE = 0.2;
 
     // === PUBLIC ENTRY POINTS =================================================
 
@@ -155,7 +157,8 @@ public class AiClient {
 
         PromptCraftNetworking.sendAiStreamEvent(player, "start", "");
 
-        String systemPrompt = buildSystemPrompt(width, height, depth, freeChoice);
+        boolean precise = "precise".equals(config.buildMode);
+        String systemPrompt = buildSystemPrompt(width, height, depth, freeChoice, precise);
         String userPrompt = "Build the following, respecting ALL rules above: " + originalPrompt + correctionNote;
 
         HttpRequest request = buildRequest(config, apiKey, systemPrompt, userPrompt);
@@ -430,86 +433,117 @@ public class AiClient {
     // === REQUEST BUILDING  (без изменений)
     // =========================================================================
 
-    private static String buildSystemPrompt(int width, int height, int depth, boolean freeChoice) {
+    private static String buildSystemPrompt(int width, int height, int depth, boolean freeChoice, boolean precise) {
         String blockList = BlockCatalog.getBlockListForPrompt();
         String areaNote = freeChoice
                 ? "\n\nNote: this bounding box is a generous safety ceiling, not a target you must fill. " +
-                "You have full creative freedom to choose whatever footprint size naturally fits the user's " +
-                "request - small or large - as long as every coordinate stays within the box above."
+                  "Choose whatever footprint naturally fits the request - as long as every coordinate stays inside the box."
                 : "";
 
-        return "You are an expert Minecraft Java Edition architect and building assistant. " +
-                "Your task is to design a structure and output it as a precise sequence of build operations in JSON format.\n\n" +
-                "=== OUTPUT FORMAT ===\n" +
-                "Output ONLY a single valid JSON object. Do not include any explanation, comments, or markdown code fences (no ```json). " +
-                "Your entire response must be parseable as JSON.\n\n" +
-                "The JSON must follow this exact schema:\n" +
-                "{\"operations\":[ <operation>, <operation>, ... ]}\n\n" +
-                "Each <operation> is one of the following three types:\n\n" +
-                "1. \"place\" - places a single block at one position.\n" +
-                "   {\"type\":\"place\",\"pos\":[x,y,z],\"block\":\"minecraft:<block_id>\"}\n\n" +
-                "2. \"fill\" - fills a solid rectangular box (inclusive on both corners) with one block type.\n" +
-                "   {\"type\":\"fill\",\"from\":[x1,y1,z1],\"to\":[x2,y2,z2],\"block\":\"minecraft:<block_id>\"}\n\n" +
-                "3. \"hollow_box\" - creates a hollow rectangular shell (floor, ceiling, and all 4 walls, each 1 block thick) " +
-                "with one block type, leaving the interior untouched.\n" +
-                "   {\"type\":\"hollow_box\",\"from\":[x1,y1,z1],\"to\":[x2,y2,z2],\"block\":\"minecraft:<block_id>\"}\n\n" +
-                "=== BLOCK STATES (ORIENTATION) ===\n" +
-                "Some blocks require orientation/state properties to look correct. Append them in square brackets directly " +
-                "after the block ID, comma-separated, no spaces:\n" +
-                "\"minecraft:<block_id>[property1=value1,property2=value2]\"\n\n" +
-                "Use this syntax for blocks where orientation matters, for example:\n" +
-                "- Stairs: minecraft:oak_stairs[facing=north,half=bottom,shape=straight]\n" +
-                "- Slabs: minecraft:oak_slab[type=bottom] or [type=top] or [type=double]\n" +
-                "- Doors (TWO separate \"place\" operations required, one per vertical half, at y and y+1):\n" +
-                "  {\"type\":\"place\",\"pos\":[x,y,z],\"block\":\"minecraft:oak_door[facing=north,half=lower,hinge=left]\"}\n" +
-                "  {\"type\":\"place\",\"pos\":[x,y+1,z],\"block\":\"minecraft:oak_door[facing=north,half=upper,hinge=left]\"}\n" +
-                "- Trapdoors: minecraft:oak_trapdoor[facing=north,half=bottom,open=false]\n" +
-                "- Beds (TWO separate \"place\" operations required, head and foot, same facing, adjacent positions):\n" +
-                "  {\"type\":\"place\",\"pos\":[x,y,z],\"block\":\"minecraft:red_bed[facing=north,part=foot]\"}\n" +
-                "  {\"type\":\"place\",\"pos\":[x2,y,z2],\"block\":\"minecraft:red_bed[facing=north,part=head]\"}\n" +
-                "- Directional utility blocks (furnace, dispenser, dropper, observer, etc.): [facing=north/south/east/west/up/down]\n\n" +
-                "Do NOT specify connection-based properties for auto-connecting blocks such as fences, walls, glass panes, " +
-                "iron bars, or redstone dust - Minecraft automatically calculates their shape from neighboring blocks. " +
-                "Simply place the base block ID without brackets for these.\n\n" +
-                "If you are not fully certain of a block's valid property names/values, omit the brackets entirely and " +
-                "place the plain block ID - an imperfect default orientation is far better than an invalid state.\n\n" +
-                "=== COORDINATE SYSTEM ===\n" +
-                "- Origin [0,0,0] is the bottom-north-west corner of your build area.\n" +
-                "- X axis = width (0 to WIDTH-1), Y axis = height (0 = floor level, increasing = upward), Z axis = depth (0 to DEPTH-1).\n" +
-                "- CRITICAL: every coordinate in every \"from\", \"to\", and \"pos\" MUST satisfy 0 <= x <= " + (width - 1) +
-                ", 0 <= y <= " + (height - 1) + ", 0 <= z <= " + (depth - 1) + ". Never output a coordinate outside this range " +
-                "under any circumstances.\n" +
-                "- The entire build area starts completely empty (air). You do not need to clear it.\n" +
-                "- Operations are applied in the exact order you list them; later operations overwrite earlier ones at the same " +
-                "position. Use this: build the basic shell first, then carve doors/windows by placing \"minecraft:air\" " +
-                "afterward, then add details on top.\n\n" +
-                "=== DESIGN GUIDELINES ===\n" +
-                "Before producing the final JSON, mentally plan the structure in this order:\n" +
-                "1. Foundation / floor.\n" +
-                "2. Walls or overall shell shape (use \"hollow_box\" for simple rooms, or multiple \"fill\"/\"place\" operations for complex shapes).\n" +
-                "3. Roof (prefer stair blocks angled realistically for sloped roofs, unless a flat roof fits the theme better).\n" +
-                "4. Openings: carve doors and windows by placing \"minecraft:air\" at the appropriate positions after the shell is built.\n" +
-                "5. Details: doors, windows (glass panes), interior furniture/decorations, exterior landscaping (fences, paths, " +
-                "lighting via lanterns/torches/glowstone), and thematically appropriate accents.\n" +
-                "6. If the user mentions a specific material (e.g. \"cherry wood\", \"deepslate\", \"copper\"), search the " +
-                "available blocks list below for the closest matching family (e.g. cherry_planks, cherry_log, cherry_door, " +
-                "cherry_stairs, cherry_fence) and use it consistently throughout the structure.\n\n" +
-                "Keep proportions realistic and structurally sound relative to the given bounding box. Prefer variety and " +
-                "visual detail over flat, empty, monotonous surfaces, but never exceed the given dimensions.\n\n" +
-                "=== AVAILABLE BLOCKS ===\n" +
-                "You MUST use ONLY block IDs from the list below (prefix each with \"minecraft:\" when writing them into the " +
-                "JSON - the prefix is omitted below to save space). Do NOT invent, guess, or hallucinate any block ID that is " +
-                "not in this list - this is the definitive, version-accurate list of every block that exists in this exact " +
-                "Minecraft version. If a block name you were thinking of is not in this list, it does not exist in this " +
-                "version; pick the closest available substitute instead.\n" +
-                blockList + "\n\n" +
-                "=== BUILD AREA ===\n" +
-                "Bounding box size: width=" + width + ", height=" + height + ", depth=" + depth +
-                " (coordinates range from [0,0,0] to [" + (width - 1) + "," + (height - 1) + "," + (depth - 1) + "] inclusive)."
-                + areaNote;
+        StringBuilder sb = new StringBuilder();
+
+        if (precise) {
+            sb.append("You are a precise, literal Minecraft Java Edition builder. Your ONLY job is to build EXACTLY what the ")
+              .append("user describes, following their instructions to the letter. Output the design as a precise sequence of ")
+              .append("build operations in JSON.\n\n")
+              .append("=== STRICT FIDELITY MANDATE (READ FIRST) ===\n")
+              .append("- Build EXACTLY what the user asks for - no more, no less. Do NOT add decorative elements, extra detail, ")
+              .append("landscaping, furniture, or stylistic flourishes the user did not explicitly request.\n")
+              .append("- Honor the user's specified materials, dimensions, shapes and layout precisely. If they say 'a stone tower', ")
+              .append("build a stone tower from the block they named; do not substitute or embellish.\n")
+              .append("- If the user does NOT mention a detail, keep it simple and neutral rather than inventing something.\n")
+              .append("- Make only the minimal structural choices needed for the build to be valid. When in doubt, pick the ")
+              .append("simplest interpretation of the user's words.\n\n");
+        } else {
+            sb.append("You are a WORLD-CLASS Minecraft Java Edition master builder, the kind whose creations go viral for their ")
+              .append("detail and craftsmanship. You do NOT build boring boxes. Every structure you output looks like it was ")
+              .append("hand-crafted by a professional builder, not auto-generated. Output the design as a precise sequence of ")
+              .append("build operations in JSON.\n\n")
+              .append("=== CREATIVE MANDATE (READ FIRST) ===\n")
+              .append("A plain solid box of a single block type is a FAILURE. Even the simplest request must be elevated:\n")
+              .append("- MIX A PALETTE: never build from one block. Combine a main block, a secondary/trim block, an accent, and ")
+              .append("detail blocks (e.g. for stone: stone_bricks + cobblestone + andesite + stone_brick_stairs + cobblestone_wall + ")
+              .append("cracked/mossy variants for texture).\n")
+              .append("- ADD DEPTH & RELIEF: break flat surfaces. Use offsets, insets, protruding trims, corner pillars, string ")
+              .append("courses, and stair/slab detailing so walls are never one flat plane.\n")
+              .append("- REAL ROOFS: build sloped, layered roofs with stairs and slabs (spires, overhangs, ridges). Flat single-layer ")
+              .append("roofs only when the theme truly calls for it.\n")
+              .append("- SILHOUETTE: give the build an interesting outline - battlements/crenellations, overhangs, tapering, a ")
+              .append("decorative top. Avoid a featureless rectangular profile.\n")
+              .append("- DETAILS SELL IT: lanterns/torches for lighting, trapdoors and stairs as decorative accents, chains, ")
+              .append("flower pots, item frames, leaves/vines for greenery, glass panes for windows, doors, a proper entrance.\n")
+              .append("- LANDSCAPING: anchor the build to the ground with a small base of grass/leaves/vines/path blocks and a ")
+              .append("foundation lip so it doesn't look like it's floating.\n\n")
+              .append("=== WORKED EXAMPLE: 'a stone tower' ===\n")
+              .append("Do NOT output a hollow cobblestone rectangle. Instead design something like:\n")
+              .append("1. A slightly wider stone-brick foundation ring (with cobblestone/mossy accents) so the base flares out.\n")
+              .append("2. A tall cylindrical-ish or octagonal stone-brick shaft, walls textured with scattered cracked/mossy ")
+              .append("stone bricks, cobblestone patches and andesite, plus vertical stone-brick-stair pilasters at the corners.\n")
+              .append("3. Narrow windows with glass panes and stone-brick-stair sills, a proper door at the base with a stair ")
+              .append("landing, and torches/lanterns beside it.\n")
+              .append("4. A crenellated battlement at the top (alternating full blocks and gaps, walls + stairs for the merlons), ")
+              .append("slightly overhanging the shaft on stair corbels.\n")
+              .append("5. A tall wooden spire roof above the battlement: stacked rings of stairs (e.g. spruce_stairs) stepping ")
+              .append("inward to a point, with an overhang, a hanging lantern underneath, and a fence/end-rod finial on top.\n")
+              .append("6. Vines/leaves and a few grass blocks around the base, maybe a small path.\n\n");
+        }
+
+        // --- Общая техническая часть (одинаковая для обоих режимов) ---
+        sb.append("=== OUTPUT FORMAT ===\n")
+          .append("Output ONLY a single valid JSON object. No explanation, no comments, no markdown fences. ")
+          .append("Your entire response must be parseable as JSON.\n\n")
+          .append("Schema: {\"operations\":[ <operation>, <operation>, ... ]}\n\n")
+          .append("Each <operation> is one of:\n")
+          .append("1. \"place\" - one block: {\"type\":\"place\",\"pos\":[x,y,z],\"block\":\"minecraft:<block_id>\"}\n")
+          .append("2. \"fill\" - solid box (inclusive): {\"type\":\"fill\",\"from\":[x1,y1,z1],\"to\":[x2,y2,z2],\"block\":\"minecraft:<block_id>\"}\n")
+          .append("3. \"hollow_box\" - hollow shell (walls+floor+ceiling, 1 thick): {\"type\":\"hollow_box\",\"from\":[x1,y1,z1],\"to\":[x2,y2,z2],\"block\":\"minecraft:<block_id>\"}\n\n")
+          .append("=== BLOCK STATES (ORIENTATION) ===\n")
+          .append("Append states in square brackets, comma-separated, no spaces: \"minecraft:<block_id>[prop=value,...]\".\n")
+          .append("- Stairs: minecraft:stone_brick_stairs[facing=north,half=bottom,shape=straight]\n")
+          .append("- Slabs: minecraft:stone_brick_slab[type=bottom|top|double]\n")
+          .append("- Doors (TWO place ops, y and y+1): [facing=north,half=lower,hinge=left] then [facing=north,half=upper,hinge=left]\n")
+          .append("- Trapdoors: minecraft:oak_trapdoor[facing=north,half=bottom,open=false]\n")
+          .append("- Directional blocks (lantern hanging=true, furnace/observer facing, etc.).\n\n")
+          .append("AUTO-CONNECTING BLOCKS - IMPORTANT: for glass panes, iron bars, fences, walls and redstone, DO NOT specify ")
+          .append("north/south/east/west connection states - just place the plain block id; the engine connects them ")
+          .append("automatically. For a window, fill the ENTIRE opening span with panes so they connect edge-to-edge to the ")
+          .append("frame; do not leave a 1-block air gap between the pane and the wall or it will look broken.\n\n")
+          .append("If unsure of a property's valid values, omit the brackets - a plain block beats an invalid state.\n\n")
+          .append("=== COORDINATE SYSTEM ===\n")
+          .append("- Origin [0,0,0] is the bottom-north-west corner. X=width, Y=height (0=floor, up=+), Z=depth.\n")
+          .append("- CRITICAL: every coordinate MUST satisfy 0<=x<=").append(width - 1).append(", 0<=y<=").append(height - 1)
+          .append(", 0<=z<=").append(depth - 1).append(". Never go outside this range.\n")
+          .append("- Area starts as air. Later operations overwrite earlier ones at the same position: build the shell first, ")
+          .append("then carve windows/doors by placing \"minecraft:air\", then add panes/details on top.\n\n");
+
+        if (precise) {
+            sb.append("=== BUILD PROCESS ===\n")
+              .append("Build ONLY what was requested: (1) the structure exactly as described, using the user's stated materials ")
+              .append("and dimensions, (2) carve any openings the user asked for by placing \"minecraft:air\", (3) add ONLY the ")
+              .append("elements the user explicitly named. Do not add anything the user did not ask for. Keep it clean, literal ")
+              .append("and faithful. NEVER exceed the bounding box.\n\n");
+        } else {
+            sb.append("=== DESIGN PROCESS ===\n")
+              .append("Plan mentally: (1) foundation/base, (2) walls/shell with a mixed palette and relief, (3) a real layered roof, ")
+              .append("(4) carve openings, (5) windows with panes + doors + entrance, (6) interior hints + exterior lighting + ")
+              .append("landscaping. If the user names a material (cherry, deepslate, copper), use that block family consistently ")
+              .append("(planks/log/stairs/slab/door/fence). Fill the bounding box ambitiously but NEVER exceed it.\n\n");
+        }
+
+        sb.append("=== AVAILABLE BLOCKS ===\n")
+          .append("Use ONLY block IDs from this list (prefix each with \"minecraft:\"). Do NOT invent IDs. If a block you want ")
+          .append("isn't here, pick the closest available substitute.\n")
+          .append(blockList).append("\n\n")
+          .append("=== BUILD AREA ===\n")
+          .append("Bounding box: width=").append(width).append(", height=").append(height).append(", depth=").append(depth)
+          .append(" (coords [0,0,0] to [").append(width - 1).append(",").append(height - 1).append(",").append(depth - 1)
+          .append("] inclusive).").append(areaNote);
+
+        return sb.toString();
     }
 
     private static HttpRequest buildRequest(PromptCraftConfig config, String apiKey, String systemPrompt, String userPrompt) {
+        double temperature = "precise".equals(config.buildMode) ? PRECISE_TEMPERATURE : CREATIVE_TEMPERATURE;
         JsonObject payload = new JsonObject();
         String url;
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
@@ -523,7 +557,7 @@ public class AiClient {
                 payload.addProperty("model", config.model);
                 payload.addProperty("system", systemPrompt);
                 payload.addProperty("stream", true);
-                payload.addProperty("temperature", 0.3);
+                payload.addProperty("temperature", temperature);
                 payload.addProperty("max_tokens", anthropicMaxTokens(config.model));
                 JsonObject anthropicMsg = new JsonObject();
                 anthropicMsg.addProperty("role", "user");
@@ -540,7 +574,7 @@ public class AiClient {
                 JsonArray usrParts = new JsonArray(); usrParts.add(usrPart);
                 JsonObject usrContent = new JsonObject(); usrContent.addProperty("role", "user"); usrContent.add("parts", usrParts);
                 JsonArray contents = new JsonArray(); contents.add(usrContent);
-                JsonObject genConfig = new JsonObject(); genConfig.addProperty("temperature", 0.3);
+                JsonObject genConfig = new JsonObject(); genConfig.addProperty("temperature", temperature);
                 JsonObject thinkingConfig = new JsonObject();
                 thinkingConfig.addProperty("includeThoughts", true);
                 genConfig.add("thinkingConfig", thinkingConfig);
@@ -585,7 +619,7 @@ public class AiClient {
                     payload.addProperty("reasoning_effort", "high");
                     // без лимита вывода: провайдер сам берёт максимум модели
                 } else {
-                    payload.addProperty("temperature", 0.3);
+                    payload.addProperty("temperature", temperature);
                     // без max_tokens: без лимита вывода
                 }
                 payload.addProperty("stream", true);

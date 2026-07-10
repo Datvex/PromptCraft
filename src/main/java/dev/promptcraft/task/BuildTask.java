@@ -13,7 +13,9 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 public class BuildTask implements Task {
@@ -37,6 +39,11 @@ public class BuildTask implements Task {
 
     private final Set<String> unknownBlocks = new LinkedHashSet<>();
 
+    // --- Фаза 2: пересчёт соединяющихся блоков ---
+    private final List<BlockPos> connectingPositions = new ArrayList<>();
+    private boolean placementDone = false;
+    private int connectionIndex = 0;
+
     // --- Прогресс ---
     private final long totalCells;
     private long visited = 0L;
@@ -50,7 +57,6 @@ public class BuildTask implements Task {
         this.session = session;
         this.totalCells = estimateTotalCells(structure);
         if (session != null) session.markBuildStarted();
-        // Полоска появляется сразу, как только начинаем размещать.
         PromptCraftNetworking.sendBuildProgress(player, 0, true);
     }
 
@@ -71,11 +77,17 @@ public class BuildTask implements Task {
         return total;
     }
 
+    private void recordIfConnecting(BlockPos worldPos, BlockState state) {
+        if (ConnectingBlocks.needsConnectionUpdate(state)) {
+            connectingPositions.add(worldPos);
+        }
+    }
+
     @Override
     public boolean tick() {
         if (session != null && session.isCancelled()) {
             session.markBuildFinished();
-            PromptCraftNetworking.sendBuildProgress(player, 0, false); // прячем полоску
+            PromptCraftNetworking.sendBuildProgress(player, 0, false);
             return true;
         }
 
@@ -85,10 +97,24 @@ public class BuildTask implements Task {
 
         int budget = BLOCKS_PER_TICK;
 
+        // ===== ФАЗА 2: пересчёт соединений (панели/заборы/стены/лестницы) =====
+        if (placementDone) {
+            while (budget > 0 && connectionIndex < connectingPositions.size()) {
+                ConnectingBlocks.refresh(world, connectingPositions.get(connectionIndex++));
+                budget--;
+            }
+            if (connectionIndex >= connectingPositions.size()) {
+                return finish();
+            }
+            return false;
+        }
+
+        // ===== ФАЗА 1: установка блоков =====
         while (budget > 0) {
             if (!opInProgress) {
                 if (opIndex >= structure.operations.size()) {
-                    return finish();
+                    placementDone = true;
+                    return false; // переходим к фазе 2 со следующего тика
                 }
                 PromptCraftStructure.Operation op = structure.operations.get(opIndex);
                 if (op.block == null) { opIndex++; continue; }
@@ -103,7 +129,9 @@ public class BuildTask implements Task {
                 int flags = BlockPlacementUtil.flagsFor(state);
 
                 if ("place".equals(op.type) && op.pos != null && op.pos.length == 3) {
-                    world.setBlockState(origin.add(op.pos[0], op.pos[1], op.pos[2]), state, flags);
+                    BlockPos wp = origin.add(op.pos[0], op.pos[1], op.pos[2]);
+                    world.setBlockState(wp, state, flags);
+                    recordIfConnecting(wp, state);
                     budget--;
                     visited++;
                     opIndex++;
@@ -126,6 +154,8 @@ public class BuildTask implements Task {
                 }
             }
 
+            boolean connecting = ConnectingBlocks.needsConnectionUpdate(opState);
+
             while (budget > 0 && curY <= opMaxY) {
                 boolean skip = opHollow
                         && curX > opMinX && curX < opMaxX
@@ -133,7 +163,9 @@ public class BuildTask implements Task {
                         && curZ > opMinZ && curZ < opMaxZ;
 
                 if (!skip) {
-                    world.setBlockState(origin.add(curX, curY, curZ), opState, opFlags);
+                    BlockPos wp = origin.add(curX, curY, curZ);
+                    world.setBlockState(wp, opState, opFlags);
+                    if (connecting) connectingPositions.add(wp);
                 }
                 budget--;
                 visited++;
@@ -158,7 +190,6 @@ public class BuildTask implements Task {
     }
 
     private void sendProgress() {
-        // Держим потолок 99% для тикающей стадии; ровно 100% отдаём только в finish().
         int percent = totalCells <= 0 ? 99 : (int) Math.min(99L, (visited * 100L) / totalCells);
         if (percent != lastSentPercent) {
             lastSentPercent = percent;
@@ -174,7 +205,7 @@ public class BuildTask implements Task {
         player.sendMessage(Text.literal(PromptCraftLang.t("Building complete!", "Постройка завершена!")).formatted(Formatting.GREEN), false);
         if (session != null) session.markBuildFinished();
         PromptSessionManager.clearGeneration(player);
-        PromptCraftNetworking.sendBuildProgress(player, 100, false); // показать 100% и погасить
+        PromptCraftNetworking.sendBuildProgress(player, 100, false);
         PromptCraftNetworking.sendAiStreamEvent(player, "done", "");
         return true;
     }

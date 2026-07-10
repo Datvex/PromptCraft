@@ -9,6 +9,7 @@ public class PromptCraftConfig {
     public String language = "en"; // en or ru
     
     public String generationMode = "manual"; // "manual" или "free"
+    public String buildMode = "creative"; // "creative" (высокая креативность) или "precise" (строго по промпту)
 
     public boolean showProcessMessages = true;
     public boolean enableDestructionAnimation = true;

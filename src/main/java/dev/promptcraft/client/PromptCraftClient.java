@@ -227,7 +227,7 @@ public class PromptCraftClient implements ClientModInitializer {
             int barWidth = 160;
             int barHeight = 9;
             int barX = (screenWidth - barWidth) / 2;
-            int barY = screenHeight - 52;
+            int barY = 20;
 
             String hex = PromptCraftConfigManager.get().themeColor.replace("#", "");
             int rgb = 0x17b95f;
@@ -235,7 +235,7 @@ public class PromptCraftClient implements ClientModInitializer {
             int fillColor = 0xFF000000 | rgb;
 
             String label = PromptCraftLang.t("Building structure", "Строительство структуры");
-            drawContext.drawTextWithShadow(client.textRenderer, label, barX, barY - 12, 0xFFFFFFFF);
+            drawContext.drawTextWithShadow(client.textRenderer, label, barX, barY + barHeight + 4, 0xFFFFFFFF);
 
             // рамка + фон трека
             drawContext.fill(barX - 1, barY - 1, barX + barWidth + 1, barY + barHeight + 1, 0xFF000000);

@@ -111,9 +111,15 @@ public class PromptCraftSettingsScreen extends Screen {
     private FlatButton nextButton;
     private FlatButton modeButton;
     private boolean modeMenuOpen = false;
+    private FlatButton buildModeButton;
+    private boolean buildModeMenuOpen = false;
     private static final String[] MODE_OPTIONS = {"Manual Area", "AI Free Area"};
     private static final String[] MODE_OPTIONS_RU = {"Ручной выбор", "Свободный (от ИИ)"};
     private static final String[] MODE_CODES = {"manual", "free"};
+
+    private static final String[] BUILD_MODE_OPTIONS = {"High Creativity", "Strict Prompt"};
+    private static final String[] BUILD_MODE_OPTIONS_RU = {"Высокая креативность", "Строго по промпту"};
+    private static final String[] BUILD_MODE_CODES = {"creative", "precise"};
 
     private FlatButton limitEnabledButton;
     private TextFieldWidget maxWidthField;
@@ -268,6 +274,16 @@ public class PromptCraftSettingsScreen extends Screen {
 
         refreshButton = new IconButton(contentX + 160, contentY + 80, 22, 22, REFRESH_ICON, button -> fetchModels());
         this.addDrawableChild(refreshButton);
+
+        buildModeButton = new FlatButton(
+                contentX - 5,
+                contentY + 132,
+                190,
+                20,
+                Text.literal(getBuildModeDisplayName(dev.promptcraft.config.PromptCraftConfigManager.get().buildMode)),
+                button -> buildModeMenuOpen = !buildModeMenuOpen
+        );
+        this.addDrawableChild(buildModeButton);
 
         previewButton = new FlatButton(
                 contentX - 5,
@@ -449,6 +465,7 @@ public class PromptCraftSettingsScreen extends Screen {
         if (apiKeyField != null) { apiKeyField.visible = isApi; apiKeyField.active = isApi; }
         if (modelButton != null) { modelButton.visible = isApi; modelButton.active = isApi; }
         if (refreshButton != null) { refreshButton.visible = isApi; refreshButton.active = isApi; }
+        if (buildModeButton != null) { buildModeButton.visible = isApi; buildModeButton.active = isApi; }
 
         if (previewButton != null) { previewButton.visible = isAnim; previewButton.active = isAnim; }
 
@@ -727,9 +744,11 @@ public class PromptCraftSettingsScreen extends Screen {
             if (modelMenuOpen) { modelMenuOpen = false; return true; }
             if (providerMenuOpen) { providerMenuOpen = false; return true; }
             if (langMenuOpen) { langMenuOpen = false; return true; }
+            if (buildModeMenuOpen) { buildModeMenuOpen = false; return true; }
         }
 
         if (modeMenuOpen) return true;
+        if (buildModeMenuOpen) return true;
         if (providerMenuOpen || langMenuOpen) return true;
 
         if (modelMenuOpen) {
@@ -758,7 +777,7 @@ public class PromptCraftSettingsScreen extends Screen {
 
     @Override
     public boolean charTyped(char chr, int modifiers) {
-        if (providerMenuOpen || langMenuOpen) return true;
+        if (providerMenuOpen || langMenuOpen || buildModeMenuOpen) return true;
 
         if (modelMenuOpen) {
             modelSearchField.charTyped(chr, modifiers);
@@ -792,6 +811,7 @@ public class PromptCraftSettingsScreen extends Screen {
         }
 
         if (modeMenuOpen) return handleModeMenuClick(mouseX, mouseY);
+        if (buildModeMenuOpen) return handleBuildModeMenuClick(mouseX, mouseY);
         if (providerMenuOpen) return handleProviderMenuClick(mouseX, mouseY);
         if (modelMenuOpen) return handleModelMenuClick(mouseX, mouseY, button);
         if (langMenuOpen) return handleLangMenuClick(mouseX, mouseY);
@@ -903,6 +923,7 @@ public class PromptCraftSettingsScreen extends Screen {
                 langMenuOpen = false;
 
                 langButton.setMessage(Text.literal(t("Change language", "Изменить язык")));
+                buildModeButton.setMessage(Text.literal(getBuildModeDisplayName(dev.promptcraft.config.PromptCraftConfigManager.get().buildMode)));
                 previewButton.setMessage(Text.literal(t("Dynamic Preview: ", "Динамический предпросмотр: ") + (showPreview ? t("ON", "ВКЛ") : t("OFF", "ВЫКЛ"))));
                 outlineButton.setMessage(Text.literal(getOutlineButtonText()));
                 outlineThroughBlocksButton.setMessage(Text.literal(getOutlineThroughBlocksButtonText()));
@@ -1043,6 +1064,7 @@ public class PromptCraftSettingsScreen extends Screen {
             context.drawTextWithShadow(this.textRenderer, t("Provider:", "Провайдер:"), contentX - 5, contentY - 12, 0xFFFFFF);
             context.drawTextWithShadow(this.textRenderer, t("API Key:", "API-ключ:"), contentX - 5, contentY + 26, 0xFFFFFF);
             context.drawTextWithShadow(this.textRenderer, t("Model:", "Модель:"), contentX - 5, contentY + 68, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, t("Generation Mode:", "Режим генерации:"), contentX - 5, contentY + 122, 0xFFFFFF);
 
             if (isFetchingModels) {
                 context.drawTextWithShadow(this.textRenderer, t("Fetching...", "Загрузка..."), contentX - 5, contentY + 110, 0xAAAAAA);
@@ -1075,6 +1097,7 @@ public class PromptCraftSettingsScreen extends Screen {
         super.render(context, mouseX, mouseY, delta);
 
         if (modeMenuOpen) renderModeMenu(context);
+        if (buildModeMenuOpen) renderBuildModeMenu(context);
         if (providerMenuOpen) renderProviderMenu(context);
         if (langMenuOpen) renderLangMenu(context);
         if (modelMenuOpen) renderModelMenu(context, mouseX, mouseY, delta);
@@ -1496,6 +1519,70 @@ public class PromptCraftSettingsScreen extends Screen {
             int itemY = oy + 30 + i * 22;
             boolean selected = MODE_CODES[i].equals(dev.promptcraft.config.PromptCraftConfigManager.get().generationMode);
 
+            context.fill(ox + 10, itemY, ox + overlayW - 10, itemY + 20, selected ? themeColorInt : 0xFF2D2D2D);
+            context.drawText(this.textRenderer, options[i], ox + 16, itemY + 6, selected ? 0x000000 : 0xD2D2D2, false);
+        }
+
+        context.getMatrices().pop();
+    }
+
+    private String getBuildModeDisplayName(String code) {
+        boolean isRu = "ru".equals(language);
+        if ("precise".equals(code)) return isRu ? "Строго по промпту" : "Strict Prompt";
+        return isRu ? "Высокая креативность" : "High Creativity";
+    }
+
+    private boolean handleBuildModeMenuClick(double mouseX, double mouseY) {
+        int overlayW = 220;
+        int overlayH = 90;
+        int ox = this.width / 2 - overlayW / 2;
+        int oy = this.height / 2 - overlayH / 2;
+
+        int closeX = ox + overlayW - 22;
+        int closeY = oy + 5;
+        if (mouseX >= closeX && mouseX <= closeX + 18 && mouseY >= closeY && mouseY <= closeY + 14) {
+            buildModeMenuOpen = false;
+            return true;
+        }
+
+        String[] options = "ru".equals(language) ? BUILD_MODE_OPTIONS_RU : BUILD_MODE_OPTIONS;
+        for (int i = 0; i < options.length; i++) {
+            int itemY = oy + 30 + i * 22;
+            if (mouseX >= ox + 10 && mouseX <= ox + overlayW - 10 && mouseY >= itemY && mouseY <= itemY + 20) {
+                String code = BUILD_MODE_CODES[i];
+                dev.promptcraft.config.PromptCraftConfigManager.get().buildMode = code;
+                buildModeButton.setMessage(Text.literal(getBuildModeDisplayName(code)));
+                buildModeMenuOpen = false;
+                markDirty();
+                return true;
+            }
+        }
+
+        if (mouseX < ox || mouseX > ox + overlayW || mouseY < oy || mouseY > oy + overlayH) {
+            buildModeMenuOpen = false;
+        }
+        return true;
+    }
+
+    private void renderBuildModeMenu(DrawContext context) {
+        context.getMatrices().push();
+        context.getMatrices().translate(0.0f, 0.0f, 400.0f);
+
+        int overlayW = 220;
+        int overlayH = 90;
+        int ox = this.width / 2 - overlayW / 2;
+        int oy = this.height / 2 - overlayH / 2;
+
+        renderOverlayBase(context, ox, oy, overlayW, overlayH);
+        context.drawTextWithShadow(this.textRenderer, t("Select Generation Mode", "Выберите режим генерации"), ox + 10, oy + 6, 0xFFFFFF);
+        renderCloseButton(context, ox + overlayW - 22, oy + 5);
+
+        int themeColorInt = parseThemeColor(themeColor);
+        String[] options = "ru".equals(language) ? BUILD_MODE_OPTIONS_RU : BUILD_MODE_OPTIONS;
+
+        for (int i = 0; i < options.length; i++) {
+            int itemY = oy + 30 + i * 22;
+            boolean selected = BUILD_MODE_CODES[i].equals(dev.promptcraft.config.PromptCraftConfigManager.get().buildMode);
             context.fill(ox + 10, itemY, ox + overlayW - 10, itemY + 20, selected ? themeColorInt : 0xFF2D2D2D);
             context.drawText(this.textRenderer, options[i], ox + 16, itemY + 6, selected ? 0x000000 : 0xD2D2D2, false);
         }
