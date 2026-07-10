@@ -252,7 +252,7 @@ public class PromptCraftSettingsScreen extends Screen {
         );
         this.addDrawableChild(providerButton);
 
-        apiKeyField = new PasswordFieldWidget(this.textRenderer, contentX + 2, contentY + 42, 178, 12, Text.literal("API Key"));
+        apiKeyField = new PasswordFieldWidget(this.textRenderer, contentX + 2, contentY + 46, 178, 12, Text.literal("API Key"));
         apiKeyField.setMaxLength(300);
         apiKeyField.setText(apiKeys.getOrDefault(provider, ""));
         apiKeyField.setDrawsBackground(false);
@@ -264,7 +264,7 @@ public class PromptCraftSettingsScreen extends Screen {
 
         modelButton = new ModelSelectButton(
                 contentX - 5,
-                contentY + 80,
+                contentY + 84,
                 160,
                 22,
                 Text.literal(shortenModelName(model)),
@@ -272,12 +272,12 @@ public class PromptCraftSettingsScreen extends Screen {
         );
         this.addDrawableChild(modelButton);
 
-        refreshButton = new IconButton(contentX + 160, contentY + 80, 22, 22, REFRESH_ICON, button -> fetchModels());
+        refreshButton = new IconButton(contentX + 160, contentY + 84, 22, 22, REFRESH_ICON, button -> fetchModels());
         this.addDrawableChild(refreshButton);
 
         buildModeButton = new FlatButton(
                 contentX - 5,
-                contentY + 132,
+                contentY + 126,
                 190,
                 20,
                 Text.literal(getBuildModeDisplayName(dev.promptcraft.config.PromptCraftConfigManager.get().buildMode)),
@@ -1062,14 +1062,14 @@ public class PromptCraftSettingsScreen extends Screen {
 
         if (selectedTab == TAB_API) {
             context.drawTextWithShadow(this.textRenderer, t("Provider:", "Провайдер:"), contentX - 5, contentY - 12, 0xFFFFFF);
-            context.drawTextWithShadow(this.textRenderer, t("API Key:", "API-ключ:"), contentX - 5, contentY + 26, 0xFFFFFF);
-            context.drawTextWithShadow(this.textRenderer, t("Model:", "Модель:"), contentX - 5, contentY + 68, 0xFFFFFF);
-            context.drawTextWithShadow(this.textRenderer, t("Generation Mode:", "Режим генерации:"), contentX - 5, contentY + 122, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, t("API Key:", "API-ключ:"), contentX - 5, contentY + 30, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, t("Model:", "Модель:"), contentX - 5, contentY + 72, 0xFFFFFF);
+            context.drawTextWithShadow(this.textRenderer, t("Generation Mode:", "Режим генерации:"), contentX - 5, contentY + 114, 0xFFFFFF);
 
             if (isFetchingModels) {
-                context.drawTextWithShadow(this.textRenderer, t("Fetching...", "Загрузка..."), contentX - 5, contentY + 110, 0xAAAAAA);
+                context.drawTextWithShadow(this.textRenderer, t("Fetching...", "Загрузка..."), contentX - 5, contentY + 150, 0xAAAAAA);
             } else if (fetchError != null) {
-                context.drawTextWithShadow(this.textRenderer, fetchError, contentX - 5, contentY + 110, 0xFF5555);
+                context.drawTextWithShadow(this.textRenderer, fetchError, contentX - 5, contentY + 150, 0xFF5555);
             }
         } else if (selectedTab == TAB_LANG) {
             context.drawTextWithShadow(this.textRenderer, t("Current language:", "Текущий язык:"), contentX - 5, contentY, 0xFFFFFF);
