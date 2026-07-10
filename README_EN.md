@@ -4,7 +4,7 @@
 
 **AI building assistant for Minecraft (Fabric)**
 
-🌐 Language: [Русский](README_RU.md) | **English**
+🌐 Language: [Русский](README.md) | **English**
 
 </div>
 
