@@ -12,7 +12,7 @@
 
 ## About the mod
 
-PromptCraft is a Minecraft Java Edition mod built on the Fabric loader that lets you erect structures in the world from plain text descriptions. The player writes a request in natural language, the mod forwards it to the selected AI model (Anthropic, OpenAI, Google Gemini, DeepSeek, xAI, OpenRouter, or NVIDIA), receives back a precise sequence of build operations, and reproduces them in the game block by block, correctly handling stair orientation, doors, glass panes, and other engine-specific details of Minecraft.
+A Fabric mod that builds in Minecraft based on your text prompts. Just describe what you want to see, and an AI (GPT, Claude, Gemini, etc.) will design and construct the building right in your world, perfectly placing every block and detail.
 
 The mod is installed as a regular `.jar` file placed in the `mods` folder (Fabric Loader + Fabric API, Minecraft 1.20.1, Java 17+). Building is only available while the player is in Creative mode.
 
